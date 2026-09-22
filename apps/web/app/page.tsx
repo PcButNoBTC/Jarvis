@@ -473,6 +473,30 @@ export default function Home() {
         </div>
       </section>
 
+      <section style={{ marginTop: 24 }}>
+        <div style={card}>
+          <h2 style={{ marginTop: 0, fontSize: 18 }}>Luma modules</h2>
+          <p style={{ color: "#64748b", fontSize: 14 }}>Launch Center is one module. The operating system also includes research, opportunities, sales, projects, delivery, handoff, and revenue measurement.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10 }}>
+            {[
+              ["Discover / Research", "Find and investigate prospects"],
+              ["Opportunities", "Evidence-backed service candidates"],
+              ["Sales / Proposals", "Turn opportunities into approved work"],
+              ["Projects", "Requirements, tasks, and delivery state"],
+              ["Build / Delivery", "Generate, validate, package, deploy"],
+              ["Client Launch Center", "Choose the right launch path"],
+              ["Handoff", "Package and close the engagement"],
+              ["Analytics / Revenue", "Measure pipeline and earned revenue"],
+            ].map(([title, description]) => (
+              <div key={title} style={{ padding: 14, border: "1px solid #e2e8f0", borderRadius: 12 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{title}</div>
+                <div style={{ color: "#64748b", fontSize: 12, marginTop: 5 }}>{description}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <LaunchCenter projects={d.active_projects} />
 
       <section style={{ ...card, marginTop: 16 }}>
