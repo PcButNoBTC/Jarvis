@@ -8,6 +8,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from service_adapters import build_plan
+
 DELIVERY_ROOT = Path(os.getenv("LUMA_DELIVERY_ROOT", "/data/delivery"))
 
 SERVICE_BLUEPRINTS: dict[str, dict[str, Any]] = {
@@ -76,7 +78,7 @@ def generate_project(project: dict[str, Any]) -> dict[str, Any]:
     manifest = {
         "project_id": str(project["id"]), "business": business,
         "service": project.get("service_name"), "generated_by": "luma-delivery-v1",
-        "website": website, "requirements": req, "files": files,
+        "website": website, "requirements": req, "build_plan": build_plan(project.get("service_name"), req), "files": files,
         "acceptance_criteria": service["acceptance"],
     }
     (workspace / "delivery-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
