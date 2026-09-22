@@ -17,7 +17,7 @@ from project_options import option_definitions, validate_options, option_summary
 from requirements import compile_requirements
 from revenue import revenue_summary, service_performance
 from workflows import workflow_definition, next_step
-from integrations import providers, suggestions_for_service
+from integrations import providers, suggestions_for_service, provider_setup
 from security import authorized
 from portal import create_token, hash_token
 
@@ -313,6 +313,15 @@ def advance_workflow_run(run_id: str, payload: dict):
 def integration_suggestions(service_name: str):
     suggestions = suggestions_for_service(service_name)
     return {"service": service_name, "suggestions": [{**item, "providers": providers(item["category"])} for item in suggestions], "note": "Suggestions are optional. Connections become active only after configuration and verification."}
+
+
+@app.get("/integrations/setup/{provider}")
+def integration_setup(provider: str):
+    for category, items in providers().items():
+        if any(item["provider"] == provider for item in items):
+            setup = provider_setup(provider)
+            return {"provider": provider, "category": category, "capabilities": next(item["capabilities"] for item in items if item["provider"] == provider), "setup": setup}
+    raise HTTPException(status_code=404, detail="Unknown integration provider")
 
 
 @app.get("/integrations/providers")
