@@ -180,25 +180,147 @@ li{{margin:10px 0}}
     return ["site/index.html", "README.md", "DEPLOY.md", "CLIENT-LAUNCH.md"]
 
 def _generate_workflow_package(workspace: Path, project: dict[str, Any], service: dict[str, Any], req: dict[str, Any]) -> list[str]:
+    service_name = project.get("service_name") or "Custom Automation"
+    config = req.get("configuration") or {}
     spec = {
-        "business": project.get("business_name"), "service": project.get("service_name"),
-        "requirements": req, "inputs": req.get("inputs", []), "outputs": req.get("outputs", []),
+        "business": project.get("business_name"),
+        "service": service_name,
+        "requirements": req,
+        "configuration": config,
+        "inputs": req.get("inputs", []),
+        "outputs": req.get("outputs", []),
         "dependencies": req.get("dependencies", []),
         "workflow": req.get("workflow", ["Capture input", "Validate input", "Run approved automation", "Record result", "Escalate exceptions to a human"]),
         "acceptance_criteria": service["acceptance"],
     }
     (workspace / "workflow.json").write_text(json.dumps(spec, indent=2), encoding="utf-8")
-    (workspace / "README.md").write_text(
-        f"# {project.get('business_name', 'Client')} — {project.get('service_name', 'Automation')}\n\n"
-        "This package contains the implementation specification and activation checklist. "
-        "Provider credentials, domain ownership, calendars, phone numbers, or third-party accounts "
-        "are never fabricated; supply them during activation.\n", encoding="utf-8")
+
+    files = ["workflow.json"]
+    if service_name == "Lead Capture System":
+        files += _generate_lead_capture_package(workspace, project, req)
+    elif service_name == "Appointment Automation":
+        files += _generate_appointment_package(workspace, project, req)
+    elif service_name == "AI Receptionist":
+        files += _generate_receptionist_package(workspace, project, req)
+    elif service_name == "Review Automation":
+        files += _generate_review_package(workspace, project, req)
+    elif service_name == "Video Walkthrough":
+        files += _generate_video_package(workspace, project, req)
+    else:
+        (workspace / "README.md").write_text(
+            f"# {project.get('business_name', 'Client')} — {service_name}\\n\\n"
+            "This package contains the implementation specification and activation checklist. "
+            "Provider credentials, domain ownership, calendars, phone numbers, or third-party accounts "
+            "are never fabricated; supply them during activation.\\n",
+            encoding="utf-8")
+        files.append("README.md")
+
     (workspace / "ACTIVATION.md").write_text(
-        "# Activation checklist\n\n" +
-        "\n".join(f"- [ ] {item}" for item in service["acceptance"]) +
-        "\n- [ ] Client approval recorded\n- [ ] Production credentials supplied securely\n- [ ] Production test completed\n",
+        "# Activation checklist\\n\\n" +
+        "\\n".join(f"- [ ] {item}" for item in service["acceptance"]) +
+        "\\n- [ ] Client approval recorded\\n- [ ] Production credentials supplied securely\\n- [ ] Production test completed\\n",
         encoding="utf-8")
-    return ["workflow.json", "README.md", "ACTIVATION.md"]
+    files.append("ACTIVATION.md")
+    return files
+
+def _generate_lead_capture_package(workspace: Path, project: dict[str, Any], req: dict[str, Any]) -> list[str]:
+    config = req.get("configuration") or {}
+    destination = config.get("capture_destination") or req.get("capture_destination")
+    notification = config.get("notification_channel") or req.get("notification_channel")
+    qualification = config.get("qualification") or req.get("qualification")
+    delivery_destination = config.get("delivery_destination") or req.get("delivery_destination")
+    fields = ["name", "email", "phone", "message"]
+    form = "\n".join(f"<label>{field.title()} <input name=\"{field}\" /></label>" for field in fields)
+    html = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lead capture — {_escape(project.get("business_name", "Client"))}</title></head>
+<body><main><h1>Contact {_escape(project.get("business_name", "Client"))}</h1>
+<form method="post" action="/lead">
+{form}
+<button type="submit">Submit inquiry</button>
+</form></main></body></html>"""
+    (workspace / "lead-form.html").write_text(html, encoding="utf-8")
+    (workspace / "ROUTING.md").write_text(
+        "# Lead routing specification\\n\\n"
+        f"- Destination: {destination or 'pending'}\\n"
+        f"- Delivery destination: {delivery_destination or 'pending'}\\n"
+        f"- Notification: {notification or 'pending'}\\n"
+        f"- Qualification: {qualification or 'pending'}\\n\\n"
+        "## Required production wiring\\n\\n"
+        "- [ ] Connect the form to the approved destination\\n"
+        "- [ ] Configure notification delivery and sender identity\\n"
+        "- [ ] Add spam/abuse protection appropriate to the provider\\n"
+        "- [ ] Define retention and access rules for submitted lead data\\n"
+        "- [ ] Test valid, invalid, duplicate, and abusive submissions\\n",
+        encoding="utf-8")
+    (workspace / "TEST-PLAN.md").write_text(
+        "# Lead capture test plan\\n\\n"
+        "- Submit a valid lead and confirm it reaches the configured destination.\\n"
+        "- Confirm required-field validation.\\n"
+        "- Confirm notification delivery.\\n"
+        "- Confirm duplicate submissions are handled as specified.\\n"
+        "- Confirm spam/abuse controls are active.\\n"
+        "- Confirm no credentials or sensitive data are written to client-visible artifacts.\\n",
+        encoding="utf-8")
+    return ["lead-form.html", "ROUTING.md", "TEST-PLAN.md"]
+
+def _generate_appointment_package(workspace: Path, project: dict[str, Any], req: dict[str, Any]) -> list[str]:
+    config = req.get("configuration") or {}
+    (workspace / "BOOKING-FLOW.md").write_text(
+        "# Appointment booking flow\\n\\n"
+        f"- Calendar/provider: {config.get('calendar_provider', 'pending')}\\n"
+        f"- Reminders: {config.get('reminders', 'pending')}\\n"
+        f"- Follow-up: {config.get('follow_up', 'pending')}\\n"
+        f"- CRM: {config.get('crm') or 'none'}\\n\\n"
+        "## Activation\\n- [ ] Connect calendar/provider\\n- [ ] Configure availability and time zone\\n"
+        "- [ ] Configure reminder templates\\n- [ ] Configure no-show/follow-up behavior\\n"
+        "- [ ] Run a test booking and cancellation\\n",
+        encoding="utf-8")
+    return ["BOOKING-FLOW.md"]
+
+def _generate_receptionist_package(workspace: Path, project: dict[str, Any], req: dict[str, Any]) -> list[str]:
+    config = req.get("configuration") or {}
+    (workspace / "CALL-FLOW.md").write_text(
+        "# AI receptionist call flow\\n\\n"
+        f"- Phone provider: {config.get('phone_provider', 'pending')}\\n"
+        f"- Routing: {config.get('call_routing', 'pending')}\\n"
+        f"- Business hours: {config.get('business_hours', 'pending')}\\n"
+        f"- Escalation: {config.get('escalation', 'pending')}\\n"
+        f"- CRM/logging: {config.get('crm') or 'none'}\\n\\n"
+        "## Safety and activation\\n- [ ] Confirm greeting and business identity\\n"
+        "- [ ] Confirm escalation destination\\n- [ ] Confirm hours and after-hours behavior\\n"
+        "- [ ] Test common questions and escalation paths\\n- [ ] Review call recording/transcription policy if applicable\\n",
+        encoding="utf-8")
+    return ["CALL-FLOW.md"]
+
+def _generate_review_package(workspace: Path, project: dict[str, Any], req: dict[str, Any]) -> list[str]:
+    config = req.get("configuration") or {}
+    (workspace / "REVIEW-FLOW.md").write_text(
+        "# Review request flow\\n\\n"
+        f"- Review platform: {config.get('review_platform', 'pending')}\\n"
+        f"- Trigger: {config.get('trigger', 'pending')}\\n"
+        f"- Message channel: {config.get('message_channel', 'pending')}\\n"
+        f"- CRM/source: {config.get('crm') or 'none'}\\n\\n"
+        "## Activation\\n- [ ] Confirm review destination/profile\\n"
+        "- [ ] Configure trigger source and timing\\n- [ ] Configure compliant message templates\\n"
+        "- [ ] Test successful and failed delivery paths\\n- [ ] Confirm opt-out/consent handling where required\\n",
+        encoding="utf-8")
+    return ["REVIEW-FLOW.md"]
+
+def _generate_video_package(workspace: Path, project: dict[str, Any], req: dict[str, Any]) -> list[str]:
+    config = req.get("configuration") or {}
+    (workspace / "VIDEO-BRIEF.md").write_text(
+        "# Video walkthrough production brief\\n\\n"
+        f"- Delivery destination: {config.get('delivery_destination', 'pending')}\\n"
+        f"- Branding: {config.get('branding', 'pending')}\\n"
+        f"- Target length: {config.get('video_length', 'pending')}\\n\\n"
+        "## Scene plan\\n1. Intro and client context\\n2. Show the completed workflow/product\\n"
+        "3. Demonstrate the main user action\\n4. Explain next steps\\n5. Close with handoff/contact information\\n\\n"
+        "## Asset checklist\\n- [ ] Approved logo/brand assets\\n- [ ] Approved screenshots or screen recording source\\n"
+        "- [ ] Final script/captions\\n- [ ] Export format confirmed\\n",
+        encoding="utf-8")
+    return ["VIDEO-BRIEF.md"]
+
 
 def _escape(value: str) -> str:
     return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
