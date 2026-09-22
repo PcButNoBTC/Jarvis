@@ -427,6 +427,24 @@ Luma currently generates real artifacts and can deploy supported static sites to
 6. Use cheap/local computation for routine work and stronger models when the value justifies the cost.
 7. Measure revenue generated per Luma operating dollar.
 
+## Project Configuration / Options Center
+
+Luma has a dedicated **Project Configuration / Options Center** in the dashboard. It is separate from the Client Launch Center: configuration defines what the project should use and how it should behave; launch configuration handles the final production path.
+
+Configuration is service-specific. Examples include:
+
+- **AI Website:** hosting, lead capture, communication, analytics, handoff, domain/legal URLs.
+- **Lead Capture System:** lead destination, notifications, qualification mode, measurement, delivery destination.
+- **Appointment Automation:** calendar provider, reminders, follow-up, CRM, handoff.
+- **AI Receptionist:** phone provider, call routing, business hours, escalation, CRM, call analytics.
+- **Review Automation:** review platform, trigger, messaging channel, CRM, measurement.
+- **Video Walkthrough:** delivery destination, branding, target length.
+- **Custom Automation:** trigger, source/destination systems, notifications, credentials, production-test approval.
+
+Definitions live in `apps/api/project_options.py`, selections are persisted per project in `project_options`, and the API exposes both `/projects/{project_id}/configuration` and `/projects/{project_id}/options`. Required fields are validated before a project is considered ready for build planning.
+
+This keeps Luma modular: it does not assume every client needs the same hosting provider, CRM, calendar, phone platform, analytics tool, or launch method.
+
 ## Next development priorities
 
 - Generalize the project options engine across hosting, forms, CRM, scheduling, phone, email, analytics, payments, integrations, deployment, and handoff.
