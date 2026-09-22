@@ -166,7 +166,7 @@ def score_opportunity(analysis: dict, service_name: str | None = None) -> dict:
         "base_score": base_score,
         "factors": factors,
         "service_hint": service_name,
-        "confidence": "heuristic",
+        "confidence": round(min(0.95, 0.55 + (0.08 * len(factors))), 2),
     }
 
 
