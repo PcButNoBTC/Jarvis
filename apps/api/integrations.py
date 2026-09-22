@@ -18,6 +18,26 @@ INTEGRATION_PROVIDERS = {
         {"provider": "vercel", "capabilities": ["deploy_static"]},
         {"provider": "netlify", "capabilities": ["deploy_static"]},
     ],
+    "crm": [
+        {"provider": "hubspot", "capabilities": ["create_contact", "create_deal", "health_check"]},
+        {"provider": "salesforce", "capabilities": ["create_contact", "create_lead", "health_check"]},
+        {"provider": "pipedrive", "capabilities": ["create_contact", "create_deal", "health_check"]},
+        {"provider": "custom_crm", "capabilities": ["webhook", "health_check"]},
+    ],
+    "forms": [
+        {"provider": "netlify_forms", "capabilities": ["capture_form", "health_check"]},
+        {"provider": "webhook", "capabilities": ["receive_submission", "health_check"]},
+        {"provider": "custom_form", "capabilities": ["receive_submission"]},
+    ],
+    "phone": [
+        {"provider": "twilio", "capabilities": ["voice", "sms", "health_check"]},
+        {"provider": "telnyx", "capabilities": ["voice", "sms", "health_check"]},
+        {"provider": "existing_phone_system", "capabilities": ["call_forwarding"]},
+    ],
+    "dns": [
+        {"provider": "cloudflare_dns", "capabilities": ["dns_records", "health_check"]},
+        {"provider": "client_dns", "capabilities": ["dns_records"]},
+    ],
     "analytics": [
         {"provider": "plausible", "capabilities": ["track", "health_check"]},
     ],
@@ -31,3 +51,41 @@ def providers(category: str | None = None):
     if category:
         return INTEGRATION_PROVIDERS.get(category, [])
     return INTEGRATION_PROVIDERS
+
+
+SERVICE_INTEGRATION_SUGGESTIONS = {
+    "AI Website": [
+        {"category": "hosting", "reason": "Choose where the site will be deployed."},
+        {"category": "forms", "reason": "Choose how website inquiries are captured."},
+        {"category": "analytics", "reason": "Optional measurement of traffic and conversions."},
+        {"category": "dns", "reason": "Needed when Luma manages domain routing."},
+    ],
+    "Lead Capture System": [
+        {"category": "crm", "reason": "Optional destination for qualified leads."},
+        {"category": "forms", "reason": "Capture submissions from the website or landing page."},
+        {"category": "email", "reason": "Notify the owner when a lead arrives."},
+    ],
+    "Appointment Automation": [
+        {"category": "calendar", "reason": "Connect the booking calendar."},
+        {"category": "crm", "reason": "Optional contact/deal synchronization."},
+        {"category": "email", "reason": "Optional confirmations and follow-up."},
+    ],
+    "AI Receptionist": [
+        {"category": "phone", "reason": "Connect inbound calls, routing, and SMS where selected."},
+        {"category": "calendar", "reason": "Optional appointment booking."},
+        {"category": "crm", "reason": "Optional call/contact logging."},
+    ],
+    "Review Automation": [
+        {"category": "email", "reason": "Send review requests."},
+        {"category": "crm", "reason": "Optional trigger/source system."},
+    ],
+    "Video Walkthrough": [],
+    "Custom Automation": [
+        {"category": "email", "reason": "Optional notifications."},
+        {"category": "crm", "reason": "Common workflow destination/source."},
+    ],
+}
+
+
+def suggestions_for_service(service: str | None):
+    return SERVICE_INTEGRATION_SUGGESTIONS.get(service or "Custom Automation", SERVICE_INTEGRATION_SUGGESTIONS["Custom Automation"])
