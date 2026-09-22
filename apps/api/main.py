@@ -18,18 +18,24 @@ from requirements import compile_requirements
 from revenue import revenue_summary, service_performance
 from workflows import workflow_definition, next_step
 from integrations import providers, suggestions_for_service, provider_setup
-from security import authorized
+from security import authenticate, can, PUBLIC_PATHS
 from portal import create_token, hash_token
+from auth import hash_password, verify_password, issue_token
 
 app = FastAPI(title="Luma API", version="0.7.0")
 
 
 @app.middleware("http")
 async def api_key_guard(request: Request, call_next):
-    if request.url.path in {"/", "/health"}:
+    if request.url.path in PUBLIC_PATHS:
         return await call_next(request)
-    if not authorized(request.headers.get("X-Luma-Key")):
-        return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+    api_key=request.headers.get("X-Luma-Key")
+    authorization=request.headers.get("Authorization","")
+    bearer=authorization[7:] if authorization.lower().startswith("bearer ") else None
+    principal=authenticate(api_key,bearer)
+    if not principal:
+        return JSONResponse(status_code=401, content={"detail":"Authentication required"})
+    request.state.principal=principal
     return await call_next(request)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -2457,3 +2463,44 @@ def verify_integration(integration_id: str, payload: dict):
                 (integration_id, json.dumps({"provider": row["provider"], "category": row["category"]})),
             )
             return row
+
+
+@app.post("/auth/login")
+def login(payload: dict):
+    email=(payload.get("email") or "").strip().lower()
+    password=payload.get("password") or ""
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="email and password are required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM users WHERE lower(email)=lower(%s) AND active=true", (email,))
+            user=cur.fetchone()
+            if not user or not verify_password(password,user["password_hash"]):
+                raise HTTPException(status_code=401, detail="Invalid credentials")
+            cur.execute("UPDATE users SET last_login_at=now() WHERE id=%s", (user["id"],))
+            token=issue_token(user["id"],user["role"],user["email"])
+            return {"access_token":token,"token_type":"bearer","expires_in":int(os.getenv("LUMA_AUTH_TOKEN_TTL_SECONDS","3600")),"role":user["role"]}
+
+@app.post("/auth/users")
+def create_user(payload: dict, request: Request):
+    principal=request.state.principal
+    if not can(principal["role"],"owner"):
+        raise HTTPException(status_code=403, detail="Owner role required")
+    email=(payload.get("email") or "").strip().lower()
+    password=payload.get("password") or ""
+    role=payload.get("role","operator")
+    if not email or len(password)<12:
+        raise HTTPException(status_code=400, detail="email and password (12+ characters) are required")
+    if role not in {"owner","admin","operator","client"}:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            try:
+                cur.execute("INSERT INTO users(email,password_hash,role) VALUES (%s,%s,%s) RETURNING id,email,role,active,created_at",(email,hash_password(password),role))
+            except psycopg.errors.UniqueViolation:
+                raise HTTPException(status_code=409, detail="User already exists")
+            return cur.fetchone()
+
+@app.get("/auth/me")
+def auth_me(request: Request):
+    return request.state.principal
