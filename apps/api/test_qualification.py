@@ -78,7 +78,7 @@ def test_map_to_service_opportunities_creates_multiple():
         assert "factors" in o
         assert "title" in o
         assert "description" in o
-        assert o["confidence"] == "heuristic"
+        assert 0 < o["confidence"] <= 1
 
 
 def test_map_empty_when_no_negative_signals():
