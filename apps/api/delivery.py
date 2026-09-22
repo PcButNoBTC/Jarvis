@@ -72,7 +72,7 @@ def generate_project(project: dict[str, Any]) -> dict[str, Any]:
     if isinstance(service_list, str):
         service_list = [x.strip() for x in service_list.split(",") if x.strip()]
     if service["kind"] == "static_site":
-        files = _generate_static_site(workspace, business, title, phone, email, primary_cta, service_list, website)
+        files = _generate_static_site(workspace, business, title, phone, email, primary_cta, service_list, website, req)
     else:
         files = _generate_workflow_package(workspace, project, service, req)
     manifest = {
@@ -85,7 +85,7 @@ def generate_project(project: dict[str, Any]) -> dict[str, Any]:
     files.append("delivery-manifest.json")
     return {"workspace": str(workspace), "files": files, "manifest": manifest}
 
-def _generate_static_site(workspace: Path, business: str, title: str, phone: str, email: str, cta: str, services: list[str], website: str) -> list[str]:
+def _generate_static_site(workspace: Path, business: str, title: str, phone: str, email: str, cta: str, services: list[str], website: str, req: dict[str, Any]) -> list[str]:
     site = workspace / "site"
     site.mkdir(parents=True, exist_ok=True)
     cards = "\n".join(f'<li><strong>{_escape(s)}</strong></li>' for s in services)
@@ -95,6 +95,16 @@ def _generate_static_site(workspace: Path, business: str, title: str, phone: str
     if email:
         contact.append(f'<a href="mailto:{_escape(email)}">{_escape(email)}</a>')
     contact_html = " · ".join(contact) or "Add approved contact details before launch."
+    config = req.get("configuration") or {}
+    capture = config.get("contact_capture") or "native_form"
+    analytics = config.get("analytics") or "none"
+    if capture == "netlify_forms":
+        form_html = '<form name="contact" method="POST" data-netlify="true"><input type="hidden" name="form-name" value="contact"><label>Name <input name="name" required></label><label>Email <input name="email" type="email" required></label><label>Message <textarea name="message"></textarea></label><button type="submit">Send</button></form>'
+    elif capture == "email_only" and email:
+        form_html = f'<p><a class="btn" href="mailto:{_escape(email)}?subject=Website%20inquiry">{_escape(cta)}</a></p>'
+    else:
+        form_html = '<form><label>Name <input name="name" required></label><label>Email <input name="email" type="email" required></label><label>Message <textarea name="message"></textarea></label><button type="submit">Submit</button></form><p><small>Connect this form to the approved lead destination before launch.</small></p>'
+    analytics_note = f'<!-- Analytics selected: {_escape(analytics)}. Add approved provider/site ID before launch. -->' if analytics != "none" else ""
     html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -110,6 +120,7 @@ main{{max-width:960px;margin:auto;padding:64px 24px}}
 section{{background:#fff;padding:28px;border-radius:16px;margin-top:20px}}
 li{{margin:10px 0}}
 </style>
+{analytics_note}
 </head>
 <body>
 <main>
@@ -120,7 +131,7 @@ li{{margin:10px 0}}
 <a class="btn" href="#contact">{_escape(cta)}</a>
 </section>
 <section><h2>Services</h2><ul>{cards}</ul></section>
-<section id="contact"><h2>Contact</h2><p>{contact_html}</p></section>
+<section id="contact"><h2>Contact</h2><p>{contact_html}</p>{form_html}</section>
 </main>
 </body>
 </html>
