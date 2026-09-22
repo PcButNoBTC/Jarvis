@@ -1099,6 +1099,34 @@ def _get_opportunity(cur, opportunity_id: str):
     return row
 
 
+@app.patch("/opportunities/{opportunity_id}/lifecycle")
+def update_opportunity_lifecycle(opportunity_id: str, payload: dict):
+    allowed = {"new", "qualified", "contact_pending", "contacted", "discovery", "proposal", "won", "lost", "rejected"}
+    status = payload.get("status")
+    if status not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid opportunity status")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            opportunity = _get_opportunity(cur, opportunity_id)
+            cur.execute(
+                """UPDATE opportunities
+                   SET status=%s, next_action=%s, next_action_at=%s, updated_at=now()
+                   WHERE id=%s RETURNING *""",
+                (status, payload.get("next_action"), payload.get("next_action_at"), opportunity_id),
+            )
+            updated = cur.fetchone()
+            cur.execute(
+                """INSERT INTO activities
+                   (business_id, opportunity_id, type, subject, content, metadata)
+                   VALUES (%s,%s,'opportunity_status','Opportunity status changed',%s,%s::jsonb)""",
+                (
+                    opportunity["business_id"], opportunity_id, status,
+                    json.dumps({"from": opportunity["status"], "to": status}),
+                ),
+            )
+            return updated
+
+
 @app.get("/opportunities")
 def list_opportunities(status: str | None = None, limit: int = 50):
     limit = max(1, min(limit, 200))
@@ -1899,6 +1927,36 @@ def create_project_handoff(project_id: str):
                 (project["business_id"], project_id, "Client delivery package is ready.", json.dumps({"package": str(archive)})),
             )
             return {"handoff": handoff, "download": f"/projects/{project_id}/download"}
+
+
+@app.get("/projects/{project_id}/milestones")
+def list_project_milestones(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM projects WHERE id=%s", (project_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Project not found")
+            cur.execute("SELECT * FROM project_milestones WHERE project_id=%s ORDER BY sequence", (project_id,))
+            return cur.fetchall()
+
+
+@app.patch("/projects/{project_id}/milestones/{milestone_id}")
+def update_project_milestone(project_id: str, milestone_id: str, payload: dict):
+    allowed = {"pending", "in_progress", "blocked", "completed"}
+    if payload.get("status") not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid milestone status")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE project_milestones
+                   SET status=%s, completed_at=CASE WHEN %s='completed' THEN now() ELSE completed_at END
+                   WHERE id=%s AND project_id=%s RETURNING *""",
+                (payload["status"], payload["status"], milestone_id, project_id),
+            )
+            milestone = cur.fetchone()
+            if not milestone:
+                raise HTTPException(status_code=404, detail="Milestone not found")
+            return milestone
 
 
 @app.patch("/tasks/{task_id}/status")
