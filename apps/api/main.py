@@ -1701,6 +1701,8 @@ def validate_project_delivery(project_id: str):
             project, implementation = _delivery_project(cur, project_id)
             project["requirements"] = implementation.get("requirements") or project.get("requirements") or {}
     result = validate_project(project)
+    plan = build_plan(project.get("service_name"), project.get("requirements") or {})
+    result["qa_plan"] = plan["qa_checks"]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
