@@ -14,8 +14,8 @@ export default function Home() {
 
   return (
     <main style={{padding:32,maxWidth:1100,margin:"0 auto"}}>
-      <h1>Jarvis</h1>
-      <p>Business operating system: discover → sell → deliver → measure.</p>
+      <h1>Luma</h1>
+      <p>AI business operating system: discover → sell → deliver → measure.</p>
       <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:16,marginTop:32}}>
         {Object.entries(data || {businesses:0,opportunities:0,proposals:0,clients:0,projects:0}).map(([k,v]) =>
           <div key={k} style={{border:"1px solid #ddd",borderRadius:12,padding:20}}>
