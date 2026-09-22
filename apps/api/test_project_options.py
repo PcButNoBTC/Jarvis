@@ -1,4 +1,4 @@
-from project_options import option_definitions, validate_options
+from project_options import option_definitions, validate_options, compile_requirements
 
 
 def test_ai_website_has_service_specific_options():
@@ -15,3 +15,15 @@ def test_appointment_options_do_not_require_website_hosting():
 def test_required_option_validation():
     assert "hosting" in validate_options("AI Website", {})
     assert validate_options("AI Website", {"hosting": "vercel", "contact_capture": "native_form", "communication": "email", "handoff": "digital_package"}) == []
+
+
+def test_compile_requirements_is_stable():
+    result = compile_requirements("AI Website", {
+        "hosting": "self_hosted",
+        "contact_capture": "native_form",
+        "communication": "email",
+        "handoff": "digital_package",
+    })
+    assert result["service"] == "AI Website"
+    assert result["configuration"]["hosting"] == "self_hosted"
+    assert result["approved"] is False
