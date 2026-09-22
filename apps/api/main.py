@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import date
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
 import psycopg
@@ -406,3 +407,143 @@ def list_proposals(status: str | None = None, limit: int = 50):
                     (limit,),
                 )
             return cur.fetchall()
+
+
+class ProposalStatusUpdate(BaseModel):
+    status: str
+
+
+class ProjectStartRequest(BaseModel):
+    start_date: date | None = None
+    target_date: date | None = None
+
+
+@app.patch("/proposals/{proposal_id}/status")
+def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
+    allowed = {"draft", "sent", "accepted", "rejected", "expired"}
+    if payload.status not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid proposal status")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT p.*, o.business_id, o.service_id, o.title AS opportunity_title
+                   FROM proposals p
+                   JOIN opportunities o ON o.id = p.opportunity_id
+                   WHERE p.id = %s""",
+                (proposal_id,),
+            )
+            proposal = cur.fetchone()
+            if not proposal:
+                raise HTTPException(status_code=404, detail="Proposal not found")
+
+            if payload.status == "accepted":
+                cur.execute(
+                    """UPDATE proposals SET status = %s, accepted_at = now()
+                       WHERE id = %s RETURNING *""",
+                    (payload.status, proposal_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE proposals SET status = %s WHERE id = %s RETURNING *",
+                    (payload.status, proposal_id),
+                )
+            updated = cur.fetchone()
+
+            if payload.status != "accepted":
+                return {"proposal": updated}
+
+            cur.execute(
+                """INSERT INTO clients (business_id, status, customer_since)
+                   VALUES (%s, 'active', CURRENT_DATE)
+                   ON CONFLICT (business_id) DO UPDATE SET status = 'active'
+                   RETURNING id""",
+                (proposal["business_id"],),
+            )
+            client_id = cur.fetchone()["id"]
+
+            cur.execute(
+                """INSERT INTO projects
+                   (client_id, opportunity_id, service_id, name, status,
+                    agreed_price, recurring_price)
+                   VALUES (%s, %s, %s, %s, 'planning', %s, %s)
+                   RETURNING id""",
+                (
+                    client_id, proposal["opportunity_id"], proposal["service_id"],
+                    proposal["opportunity_title"], proposal["total_amount"],
+                    proposal["recurring_amount"],
+                ),
+            )
+            project_id = cur.fetchone()["id"]
+
+            tasks = [
+                ("Confirm requirements", "Collect required access, content, integrations, and acceptance criteria.", "high"),
+                ("Build first release", "Implement the agreed scope and document material decisions.", "high"),
+                ("Test and review", "Run functional checks and client review before handoff.", "normal"),
+                ("Handoff", "Deliver access, documentation, and operating instructions.", "normal"),
+            ]
+            for title, description, priority in tasks:
+                cur.execute(
+                    """INSERT INTO tasks (project_id, title, description, priority)
+                       VALUES (%s, %s, %s, %s)""",
+                    (project_id, title, description, priority),
+                )
+
+            cur.execute(
+                """UPDATE opportunities
+                   SET status = 'won', next_action = 'Deliver project', updated_at = now()
+                   WHERE id = %s""",
+                (proposal["opportunity_id"],),
+            )
+            cur.execute(
+                """INSERT INTO activities
+                   (business_id, opportunity_id, project_id, type, subject, content, metadata)
+                   VALUES (%s, %s, %s, 'deal_won', %s, %s, %s::jsonb)""",
+                (
+                    proposal["business_id"], proposal["opportunity_id"], project_id,
+                    "Deal accepted and project created",
+                    "Accepted proposal automatically created a client project and delivery checklist.",
+                    json.dumps({"proposal_id": str(proposal_id), "project_id": str(project_id)}),
+                ),
+            )
+            return {
+                "proposal": updated,
+                "client_id": client_id,
+                "project_id": project_id,
+                "created_tasks": len(tasks),
+            }
+
+
+@app.post("/projects/{project_id}/start")
+def start_project(project_id: str, payload: ProjectStartRequest | None = None):
+    payload = payload or ProjectStartRequest()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM projects WHERE id = %s", (project_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Project not found")
+            cur.execute(
+                """UPDATE projects
+                   SET status = 'active',
+                       start_date = COALESCE(%s, start_date, CURRENT_DATE),
+                       target_date = COALESCE(%s, target_date)
+                   WHERE id = %s RETURNING *""",
+                (payload.start_date, payload.target_date, project_id),
+            )
+            return cur.fetchone()
+
+
+@app.get("/projects/{project_id}")
+def get_project(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM projects WHERE id = %s", (project_id,))
+            project = cur.fetchone()
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            cur.execute(
+                "SELECT * FROM tasks WHERE project_id = %s ORDER BY priority DESC, created_at",
+                (project_id,),
+            )
+            project["tasks"] = cur.fetchall()
+            return project
