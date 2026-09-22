@@ -1192,6 +1192,31 @@ def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
             )
 
             cur.execute(
+                """INSERT INTO revenue_transactions
+                   (client_id, project_id, proposal_id, transaction_type, status, amount, recurring_amount, metadata)
+                   VALUES (%s,%s,%s,'sale','pending',%s,%s,%s::jsonb)""",
+                (
+                    client_id, project_id, proposal_id,
+                    proposal["total_amount"] or 0, proposal["recurring_amount"] or 0,
+                    json.dumps({"source": "proposal_acceptance"}),
+                ),
+            )
+            milestones = [
+                ("Planning", "in_progress"),
+                ("Build", "pending"),
+                ("QA", "pending"),
+                ("Client Review", "pending"),
+                ("Launch / Activation", "pending"),
+                ("Handoff", "pending"),
+            ]
+            for sequence, (name, status) in enumerate(milestones):
+                cur.execute(
+                    """INSERT INTO project_milestones (project_id, name, status, sequence)
+                       VALUES (%s,%s,%s,%s)""",
+                    (project_id, name, status, sequence),
+                )
+
+            cur.execute(
                 """UPDATE opportunities
                    SET status = 'won', next_action = 'Deliver project', updated_at = now()
                    WHERE id = %s""",
