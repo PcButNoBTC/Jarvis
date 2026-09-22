@@ -2401,7 +2401,7 @@ def portal_approve(project_id: str, token: str, payload: dict | None = None):
             cur.execute(
                 """INSERT INTO approval_history
                    (project_id, entity_type, entity_id, approval_type, decision, actor_type, notes)
-                   VALUES (%s,'project','%s','launch','approved','client',%s) RETURNING *""",
+                   VALUES (%s,'project',%s,'launch','approved','client',%s) RETURNING *""",
                 (project_id, project_id, (payload or {}).get("notes")),
             )
             approval = cur.fetchone()
