@@ -4,12 +4,14 @@ import csv
 import io
 from datetime import date
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 import psycopg
 
 from db import get_conn
 from qualification import score_opportunity, map_to_service_opportunities
 from website_analyzer import analyze_website
+from delivery import generate_project, validate_project, package_project, deploy_static
 
 app = FastAPI(title="Luma API", version="0.4.0")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -955,6 +957,15 @@ class ProjectStartRequest(BaseModel):
     target_date: date | None = None
 
 
+class ProjectRequirements(BaseModel):
+    requirements: dict = {}
+
+
+class DeliveryApproval(BaseModel):
+    approved: bool
+
+
+
 @app.patch("/proposals/{proposal_id}/status")
 def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
     allowed = {"draft", "sent", "accepted", "rejected", "expired"}
@@ -1020,9 +1031,11 @@ def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
 
             tasks = [
                 ("Confirm requirements", "Collect required access, content, integrations, and acceptance criteria.", "high"),
-                ("Build first release", "Implement the agreed scope and document material decisions.", "high"),
-                ("Test and review", "Run functional checks and client review before handoff.", "normal"),
-                ("Handoff", "Deliver access, documentation, and operating instructions.", "normal"),
+                ("Generate implementation", "Generate the actual project package from approved requirements.", "high"),
+                ("Run automated QA", "Validate generated artifacts against service acceptance criteria.", "high"),
+                ("Client review", "Share preview/package and record approval before production activation.", "high"),
+                ("Deploy or activate", "Launch the approved implementation when credentials and target are configured.", "high"),
+                ("Handoff", "Deliver access, documentation, package, and operating instructions.", "normal"),
             ]
             for title, description, priority in tasks:
                 cur.execute(
@@ -1030,6 +1043,12 @@ def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
                        VALUES (%s, %s, %s, %s)""",
                     (project_id, title, description, priority),
                 )
+            cur.execute(
+                """INSERT INTO implementations (project_id, status, requirements)
+                   VALUES (%s, 'requirements', '{}'::jsonb)
+                   ON CONFLICT (project_id) DO NOTHING""",
+                (project_id,),
+            )
 
             cur.execute(
                 """UPDATE opportunities
@@ -1058,6 +1077,239 @@ def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
 
 class TaskStatusUpdate(BaseModel):
     status: str
+
+
+@app.post("/projects/{project_id}/requirements")
+def save_project_requirements(project_id: str, payload: ProjectRequirements):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT p.id, p.status, b.name AS business_name, b.website_url,
+                          s.name AS service_name
+                   FROM projects p
+                   JOIN clients c ON c.id = p.client_id
+                   JOIN businesses b ON b.id = c.business_id
+                   LEFT JOIN services s ON s.id = p.service_id
+                   WHERE p.id = %s""",
+                (project_id,),
+            )
+            project = cur.fetchone()
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            cur.execute(
+                """INSERT INTO implementations (project_id, requirements, status, updated_at)
+                   VALUES (%s, %s::jsonb, 'requirements', now())
+                   ON CONFLICT (project_id) DO UPDATE
+                   SET requirements = EXCLUDED.requirements,
+                       status = CASE WHEN implementations.status IN ('deployed', 'complete')
+                                     THEN implementations.status ELSE 'requirements' END,
+                       updated_at = now()
+                   RETURNING *""",
+                (project_id, json.dumps(payload.requirements)),
+            )
+            implementation = cur.fetchone()
+            cur.execute(
+                "UPDATE projects SET requirements = %s::jsonb WHERE id = %s RETURNING *",
+                (json.dumps(payload.requirements), project_id),
+            )
+            project = cur.fetchone()
+            return {"project": project, "implementation": implementation}
+
+
+def _delivery_project(cur, project_id: str):
+    cur.execute(
+        """SELECT p.*, b.name AS business_name, b.website_url,
+                  s.name AS service_name
+           FROM projects p
+           JOIN clients c ON c.id = p.client_id
+           JOIN businesses b ON b.id = c.business_id
+           LEFT JOIN services s ON s.id = p.service_id
+           WHERE p.id = %s""",
+        (project_id,),
+    )
+    project = cur.fetchone()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    cur.execute("SELECT * FROM implementations WHERE project_id = %s", (project_id,))
+    implementation = cur.fetchone()
+    if not implementation:
+        cur.execute(
+            """INSERT INTO implementations (project_id, requirements, status)
+               VALUES (%s, %s::jsonb, 'requirements') RETURNING *""",
+            (project_id, json.dumps(project.get("requirements") or {})),
+        )
+        implementation = cur.fetchone()
+    return project, implementation
+
+
+@app.post("/projects/{project_id}/generate")
+def generate_project_delivery(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project, implementation = _delivery_project(cur, project_id)
+            if implementation["status"] == "approved":
+                raise HTTPException(status_code=409, detail="Approved implementation cannot be regenerated")
+            project["requirements"] = implementation.get("requirements") or {}
+    result = generate_project(project)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE implementations
+                   SET status='generated', generated_at=now(), validation='{}'::jsonb, updated_at=now()
+                   WHERE project_id=%s RETURNING *""",
+                (project_id,),
+            )
+            implementation = cur.fetchone()
+            cur.execute("DELETE FROM delivery_artifacts WHERE project_id=%s", (project_id,))
+            for name in result["files"]:
+                cur.execute(
+                    """INSERT INTO delivery_artifacts
+                       (project_id, implementation_id, kind, name, path, metadata)
+                       VALUES (%s,%s,'generated_file',%s,%s,%s::jsonb)""",
+                    (project_id, implementation["id"], name, str(result["workspace"]), json.dumps({"version": "delivery-v1"})),
+                )
+            cur.execute(
+                """UPDATE projects SET status='build' WHERE id=%s AND status NOT IN ('completed','cancelled')
+                   RETURNING id""",
+                (project_id,),
+            )
+            return {"project_id": project_id, "implementation": implementation, "generated": result}
+
+
+@app.post("/projects/{project_id}/validate")
+def validate_project_delivery(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project, implementation = _delivery_project(cur, project_id)
+            project["requirements"] = implementation.get("requirements") or project.get("requirements") or {}
+    result = validate_project(project)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE implementations
+                   SET status=%s, validated_at=CASE WHEN %s THEN now() ELSE validated_at END,
+                       validation=%s::jsonb, updated_at=now()
+                   WHERE project_id=%s RETURNING *""",
+                ("validated" if result["passed"] else "failed", result["passed"], json.dumps(result), project_id),
+            )
+            implementation = cur.fetchone()
+            return {"project_id": project_id, "implementation": implementation, "validation": result}
+
+
+@app.post("/projects/{project_id}/approval")
+def approve_project_delivery(project_id: str, payload: DeliveryApproval):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project, implementation = _delivery_project(cur, project_id)
+            if not payload.approved:
+                cur.execute(
+                    "UPDATE implementations SET status='changes_requested', approved_at=NULL, updated_at=now() WHERE project_id=%s RETURNING *",
+                    (project_id,),
+                )
+                return cur.fetchone()
+            if implementation["status"] != "validated" or not (implementation.get("validation") or {}).get("passed"):
+                raise HTTPException(status_code=409, detail="Project must pass validation before approval")
+            cur.execute(
+                """UPDATE implementations SET status='approved', approved_at=now(), updated_at=now()
+                   WHERE project_id=%s RETURNING *""",
+                (project_id,),
+            )
+            return cur.fetchone()
+
+
+@app.post("/projects/{project_id}/deploy")
+def deploy_project_delivery(project_id: str, target_root: str | None = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project, implementation = _delivery_project(cur, project_id)
+            if implementation["status"] != "approved":
+                raise HTTPException(status_code=409, detail="Project must be approved before deployment")
+            cur.execute(
+                """INSERT INTO deployment_runs
+                   (project_id, implementation_id, status, target, approved_at, started_at)
+                   VALUES (%s,%s,'running',%s,now(),now()) RETURNING *""",
+                (project_id, implementation["id"], target_root or os.getenv("LUMA_DEPLOY_ROOT")),
+            )
+            run = cur.fetchone()
+    project["requirements"] = implementation.get("requirements") or project.get("requirements") or {}
+    try:
+        result = deploy_static(project, target_root)
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE deployment_runs SET status='completed', completed_at=now(), output=%s::jsonb
+                       WHERE id=%s RETURNING *""",
+                    (json.dumps(result), run["id"]),
+                )
+                cur.execute(
+                    "UPDATE implementations SET status='deployed', updated_at=now() WHERE project_id=%s RETURNING *",
+                    (project_id,),
+                )
+                implementation = cur.fetchone()
+                cur.execute(
+                    "UPDATE projects SET status='active' WHERE id=%s RETURNING *",
+                    (project_id,),
+                )
+                project = cur.fetchone()
+                return {"project": project, "implementation": implementation, "deployment": cur.fetchone() if False else result}
+    except Exception as exc:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE deployment_runs SET status='failed', completed_at=now(), error=%s
+                       WHERE id=%s""",
+                    (f"{type(exc).__name__}: {exc}", run["id"]),
+                )
+        raise HTTPException(status_code=500, detail=f"Deployment failed: {type(exc).__name__}: {exc}")
+
+
+@app.get("/projects/{project_id}/artifacts")
+def list_project_artifacts(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM projects WHERE id=%s", (project_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Project not found")
+            cur.execute("SELECT * FROM delivery_artifacts WHERE project_id=%s ORDER BY created_at", (project_id,))
+            return cur.fetchall()
+
+
+@app.get("/projects/{project_id}/download")
+def download_project_delivery(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project, implementation = _delivery_project(cur, project_id)
+            project["requirements"] = implementation.get("requirements") or project.get("requirements") or {}
+    archive = package_project(project)
+    return FileResponse(archive, filename=archive.name, media_type="application/zip")
+
+
+@app.post("/projects/{project_id}/handoff")
+def create_project_handoff(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project, implementation = _delivery_project(cur, project_id)
+            if implementation["status"] not in {"approved", "deployed"}:
+                raise HTTPException(status_code=409, detail="Project must be validated and approved before handoff")
+            project["requirements"] = implementation.get("requirements") or project.get("requirements") or {}
+    archive = package_project(project)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO handoffs (project_id, package_path, status, completed_at)
+                   VALUES (%s,%s,'ready',now())
+                   ON CONFLICT (project_id) DO UPDATE
+                   SET package_path=EXCLUDED.package_path, status='ready', completed_at=now()
+                   RETURNING *""",
+                (project_id, str(archive)),
+            )
+            handoff = cur.fetchone()
+            cur.execute(
+                """INSERT INTO activities (business_id, project_id, type, subject, content, metadata)
+                   VALUES (%s,%s,'handoff_ready','Delivery handoff ready',%s,%s::jsonb)""",
+                (project["client_id"], project_id, "Client delivery package is ready.", json.dumps({"package": str(archive)})),
+            )
+            return {"handoff": handoff, "download": f"/projects/{project_id}/download"}
 
 
 @app.patch("/tasks/{task_id}/status")
