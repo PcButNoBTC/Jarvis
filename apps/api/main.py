@@ -124,10 +124,15 @@ def dashboard():
                 cur.execute("""
                     SELECT p.id, p.name, p.status, p.agreed_price, p.recurring_price,
                            p.start_date, p.target_date,
-                           b.name AS business_name
+                           b.name AS business_name,
+                           i.status AS implementation_status,
+                           i.validated_at, i.approved_at,
+                           h.status AS handoff_status
                     FROM projects p
                     JOIN clients c ON c.id = p.client_id
                     JOIN businesses b ON b.id = c.business_id
+                    LEFT JOIN implementations i ON i.project_id = p.id
+                    LEFT JOIN handoffs h ON h.project_id = p.id
                     WHERE p.status NOT IN ('completed', 'cancelled')
                     ORDER BY p.created_at DESC
                     LIMIT 10
