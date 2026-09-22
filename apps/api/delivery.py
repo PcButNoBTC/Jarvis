@@ -143,7 +143,28 @@ li{{margin:10px 0}}
         "- [ ] Record the final production URL in the project handoff\n",
         encoding="utf-8",
     )
-    return ["site/index.html", "README.md", "DEPLOY.md"]
+    (workspace / "CLIENT-LAUNCH.md").write_text(
+        "# Client launch requirements\n\n"
+        "The client must supply or confirm these before Luma marks the project launch-ready:\n\n"
+        "- [ ] Production domain\n"
+        "- [ ] Hosting / deployment target\n"
+        "- [ ] Hosting account or deployment access\n"
+        "- [ ] DNS access\n"
+        "- [ ] HTTPS / SSL confirmation\n"
+        "- [ ] Approved production copy, branding, and assets\n"
+        "- [ ] Primary contact email\n"
+        "- [ ] Final production URL\n\n"
+        "## Suggested resources\n\n"
+        "- Cloudflare Pages — https://pages.cloudflare.com/\n"
+        "- Vercel — https://vercel.com/\n"
+        "- Netlify — https://www.netlify.com/\n"
+        "- Cloudflare DNS — https://www.cloudflare.com/dns/\n"
+        "- Netlify Forms — https://docs.netlify.com/manage/forms/setup/\n"
+        "- Plausible Analytics — https://plausible.io/\n\n"
+        "These are optional suggestions. Luma does not create third-party accounts or fabricate credentials.\n",
+        encoding="utf-8",
+    )
+    return ["site/index.html", "README.md", "DEPLOY.md", "CLIENT-LAUNCH.md"]
 
 def _generate_workflow_package(workspace: Path, project: dict[str, Any], service: dict[str, Any], req: dict[str, Any]) -> list[str]:
     spec = {
