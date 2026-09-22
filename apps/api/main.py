@@ -13,6 +13,7 @@ from qualification import score_opportunity, map_to_service_opportunities
 from website_analyzer import analyze_website
 from delivery import generate_project, validate_project, package_project, deploy_static, check_live_url
 from project_options import option_definitions, validate_options, option_summary
+from requirements import compile_requirements
 
 app = FastAPI(title="Luma API", version="0.6.0")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -1235,7 +1236,19 @@ def generate_project_delivery(project_id: str):
                     status_code=409,
                     detail={"message": "Complete project configuration before build", "missing_options": missing},
                 )
-            project["requirements"] = implementation.get("requirements") or {}
+            try:
+                compiled = compile_requirements(service, selected, implementation.get("requirements") or {})
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"message": str(exc), "missing_options": validate_options(service, selected)},
+                ) from exc
+            cur.execute(
+                "UPDATE implementations SET requirements=%s::jsonb, updated_at=now() WHERE project_id=%s RETURNING *",
+                (json.dumps(compiled), project_id),
+            )
+            implementation = cur.fetchone()
+            project["requirements"] = compiled
     result = generate_project(project)
     with get_conn() as conn:
         with conn.cursor() as cur:
