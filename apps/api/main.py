@@ -2076,3 +2076,310 @@ def get_project(project_id: str):
             )
             project["tasks"] = cur.fetchall()
             return project
+
+
+# --- Strong MVP completion APIs ------------------------------------------------
+
+@app.get("/control/agents")
+def list_agents():
+    from agent_layer import AGENTS
+    return [{"name": name, **definition} for name, definition in AGENTS.items()]
+
+@app.get("/control/agents/{agent_name}")
+def get_agent(agent_name: str):
+    from agent_layer import agent_policy
+    try:
+        return agent_policy(agent_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+@app.post("/control/agents/evaluations")
+def evaluate_agent(payload: dict):
+    if not payload.get("agent_name"):
+        raise HTTPException(status_code=400, detail="agent_name is required")
+    score = payload.get("score")
+    if score is not None and not 0 <= float(score) <= 100:
+        raise HTTPException(status_code=400, detail="score must be between 0 and 100")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO agent_evaluations
+                   (agent_run_id, agent_name, evaluator, score, passed, feedback)
+                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
+                (payload.get("agent_run_id"), payload["agent_name"], payload.get("evaluator", "human"),
+                 score, payload.get("passed"), payload.get("feedback")),
+            )
+            return cur.fetchone()
+
+@app.get("/projects/{project_id}/dependencies")
+def list_project_dependencies(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM project_dependencies WHERE project_id=%s ORDER BY created_at", (project_id,))
+            items = cur.fetchall()
+            blockers = [x for x in items if x["required"] and x["status"] not in ("complete", "approved")]
+            return {"dependencies": items, "blocked": bool(blockers), "blockers": blockers}
+
+@app.post("/projects/{project_id}/dependencies")
+def create_project_dependency(project_id: str, payload: dict):
+    if not payload.get("name"):
+        raise HTTPException(status_code=400, detail="name is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO project_dependencies
+                   (project_id, depends_on_project_id, dependency_type, name, status, required, metadata)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+                (project_id, payload.get("depends_on_project_id"), payload.get("dependency_type", "external"),
+                 payload["name"], payload.get("status", "pending"), payload.get("required", True),
+                 json.dumps(payload.get("metadata") or {})),
+            )
+            return cur.fetchone()
+
+@app.patch("/projects/{project_id}/dependencies/{dependency_id}")
+def update_project_dependency(project_id: str, dependency_id: str, payload: dict):
+    status = payload.get("status")
+    allowed = {"pending", "in_progress", "complete", "approved", "blocked"}
+    if status and status not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid dependency status")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE project_dependencies
+                   SET status=COALESCE(%s,status),
+                       metadata=COALESCE(%s::jsonb,metadata),
+                       completed_at=CASE WHEN %s IN ('complete','approved') THEN now() ELSE completed_at END
+                   WHERE id=%s AND project_id=%s RETURNING *""",
+                (status, json.dumps(payload.get("metadata")) if payload.get("metadata") is not None else None,
+                 status, dependency_id, project_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Dependency not found")
+            return row
+
+@app.post("/projects/{project_id}/approvals")
+def record_project_approval(project_id: str, payload: dict):
+    approval_type = payload.get("approval_type")
+    decision = payload.get("decision")
+    if approval_type not in {"requirements", "build", "qa", "launch", "handoff"}:
+        raise HTTPException(status_code=400, detail="Invalid approval type")
+    if decision not in {"approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="Decision must be approved or rejected")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO approval_history
+                   (project_id, entity_type, entity_id, approval_type, decision, actor_type, actor_id, notes, metadata)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+                (project_id, payload.get("entity_type", "project"), payload.get("entity_id", project_id),
+                 approval_type, decision, payload.get("actor_type", "human"), payload.get("actor_id"),
+                 payload.get("notes"), json.dumps(payload.get("metadata") or {})),
+            )
+            return cur.fetchone()
+
+@app.get("/projects/{project_id}/approvals")
+def list_project_approvals(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM approval_history WHERE project_id=%s ORDER BY created_at DESC", (project_id,))
+            return cur.fetchall()
+
+@app.post("/projects/{project_id}/revisions")
+def create_revision(project_id: str, payload: dict):
+    if not payload.get("summary"):
+        raise HTTPException(status_code=400, detail="summary is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO revision_requests
+                   (project_id, implementation_id, requested_by, summary, details, priority)
+                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
+                (project_id, payload.get("implementation_id"), payload.get("requested_by", "client"),
+                 payload["summary"], payload.get("details"), payload.get("priority", "normal")),
+            )
+            cur.execute(
+                """INSERT INTO activities (project_id, type, subject, content, metadata)
+                   VALUES (%s,'revision_requested','Client revision request',%s,%s::jsonb)""",
+                (project_id, payload["summary"], json.dumps({"priority": payload.get("priority", "normal")})),
+            )
+            return cur.fetchone()
+
+@app.patch("/projects/{project_id}/revisions/{revision_id}")
+def update_revision(project_id: str, revision_id: str, payload: dict):
+    status = payload.get("status")
+    if status and status not in {"requested", "accepted", "rejected", "completed"}:
+        raise HTTPException(status_code=400, detail="Invalid revision status")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE revision_requests SET status=COALESCE(%s,status),
+                   resolved_at=CASE WHEN %s IN ('completed','rejected') THEN now() ELSE resolved_at END
+                   WHERE id=%s AND project_id=%s RETURNING *""",
+                (status, status, revision_id, project_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Revision request not found")
+            return row
+
+@app.get("/projects/{project_id}/revisions")
+def list_revisions(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM revision_requests WHERE project_id=%s ORDER BY created_at DESC", (project_id,))
+            return cur.fetchall()
+
+@app.get("/projects/{project_id}/qa-contract")
+def project_qa_contract(project_id: str):
+    from service_adapters import build_plan
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project, implementation = _delivery_project(cur, project_id)
+            requirements = (implementation or {}).get("requirements") or project.get("requirements") or {}
+            return build_plan(project.get("service_name"), requirements)
+
+@app.get("/integrations/{integration_id}/health")
+def integration_health(integration_id: str):
+    from integration_runtime import runtime
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM integration_connections WHERE id=%s", (integration_id,))
+            connection = cur.fetchone()
+            if not connection:
+                raise HTTPException(status_code=404, detail="Integration not found")
+            result = runtime.adapter(connection["provider"]).health_check()
+            new_status = "verified" if result.status == "ok" else connection["status"]
+            cur.execute(
+                "UPDATE integration_connections SET status=%s, connected_at=CASE WHEN %s='verified' THEN COALESCE(connected_at,now()) ELSE connected_at END WHERE id=%s RETURNING *",
+                (new_status, new_status, integration_id),
+            )
+            return {"connection": cur.fetchone(), "health": result.__dict__}
+
+@app.post("/integrations/{integration_id}/execute")
+def integration_execute(integration_id: str, payload: dict):
+    from integration_runtime import runtime
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM integration_connections WHERE id=%s", (integration_id,))
+            connection = cur.fetchone()
+            if not connection:
+                raise HTTPException(status_code=404, detail="Integration not found")
+            if connection["status"] != "verified":
+                raise HTTPException(status_code=409, detail="Integration must be verified before execution")
+            result = runtime.adapter(connection["provider"]).execute(payload.get("capability", "unknown"), payload.get("payload"))
+            return {"connection_id": integration_id, "result": result.__dict__}
+
+@app.post("/secrets/references")
+def create_secret_reference(payload: dict):
+    if not payload.get("provider") or not payload.get("reference") or not payload.get("owner_type"):
+        raise HTTPException(status_code=400, detail="provider, reference, and owner_type are required")
+    # Only a reference is accepted. Raw credentials are intentionally rejected.
+    forbidden = {"secret", "password", "token", "api_key", "auth_token", "client_secret"}
+    if any(k in payload for k in forbidden):
+        raise HTTPException(status_code=400, detail="Raw credentials are not accepted; store them in a secret manager and submit a reference")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO secret_references (owner_type, owner_id, provider, reference, metadata)
+                   VALUES (%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+                (payload["owner_type"], payload.get("owner_id"), payload["provider"], payload["reference"],
+                 json.dumps(payload.get("metadata") or {})),
+            )
+            return cur.fetchone()
+
+@app.post("/secrets/references/{reference_id}/revoke")
+def revoke_secret_reference(reference_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE secret_references SET status='revoked', revoked_at=now() WHERE id=%s RETURNING *", (reference_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Secret reference not found")
+            return row
+
+@app.get("/recurring-revenue")
+def list_recurring_revenue(status: str | None = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if status:
+                cur.execute("SELECT * FROM recurring_revenue WHERE status=%s ORDER BY next_billing_at NULLS LAST", (status,))
+            else:
+                cur.execute("SELECT * FROM recurring_revenue ORDER BY next_billing_at NULLS LAST")
+            return cur.fetchall()
+
+@app.post("/recurring-revenue")
+def create_recurring_revenue(payload: dict):
+    if payload.get("amount") is None:
+        raise HTTPException(status_code=400, detail="amount is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO recurring_revenue
+                   (client_id, project_id, billing_record_id, amount, currency, interval, next_billing_at, metadata)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+                (payload.get("client_id"), payload.get("project_id"), payload.get("billing_record_id"),
+                 payload["amount"], payload.get("currency", "USD"), payload.get("interval", "month"),
+                 payload.get("next_billing_at"), json.dumps(payload.get("metadata") or {})),
+            )
+            return cur.fetchone()
+
+@app.patch("/recurring-revenue/{revenue_id}")
+def update_recurring_revenue(revenue_id: str, payload: dict):
+    status = payload.get("status")
+    if status and status not in {"active", "paused", "cancelled"}:
+        raise HTTPException(status_code=400, detail="Invalid recurring revenue status")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE recurring_revenue SET amount=COALESCE(%s,amount), status=COALESCE(%s,status),
+                   next_billing_at=COALESCE(%s,next_billing_at),
+                   cancelled_at=CASE WHEN %s='cancelled' THEN now() ELSE cancelled_at END
+                   WHERE id=%s RETURNING *""",
+                (payload.get("amount"), status, payload.get("next_billing_at"), status, revenue_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Recurring revenue record not found")
+            return row
+
+@app.get("/automation/schedules")
+def list_automation_schedules():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM automation_schedules ORDER BY next_run_at NULLS LAST")
+            return cur.fetchall()
+
+@app.post("/automation/schedules")
+def create_automation_schedule(payload: dict):
+    if not payload.get("workflow_name") or not payload.get("cron_expression"):
+        raise HTTPException(status_code=400, detail="workflow_name and cron_expression are required")
+    try:
+        workflow_definition(payload["workflow_name"])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO automation_schedules (workflow_name, cron_expression, input, next_run_at)
+                   VALUES (%s,%s,%s::jsonb,%s) RETURNING *""",
+                (payload["workflow_name"], payload["cron_expression"], json.dumps(payload.get("input") or {}),
+                 payload.get("next_run_at")),
+            )
+            return cur.fetchone()
+
+@app.patch("/automation/schedules/{schedule_id}")
+def update_automation_schedule(schedule_id: str, payload: dict):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE automation_schedules SET enabled=COALESCE(%s,enabled), cron_expression=COALESCE(%s,cron_expression),
+                   next_run_at=COALESCE(%s,next_run_at), input=COALESCE(%s::jsonb,input)
+                   WHERE id=%s RETURNING *""",
+                (payload.get("enabled"), payload.get("cron_expression"), payload.get("next_run_at"),
+                 json.dumps(payload.get("input")) if payload.get("input") is not None else None, schedule_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Schedule not found")
+            return row
