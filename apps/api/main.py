@@ -8,13 +8,23 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 import psycopg
 
-from db import get_conn
+from db import get_conn, ensure_delivery_schema
 from qualification import score_opportunity, map_to_service_opportunities
 from website_analyzer import analyze_website
 from delivery import generate_project, validate_project, package_project, deploy_static
 
 app = FastAPI(title="Luma API", version="0.4.0")
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+
+@app.on_event("startup")
+def startup():
+    if DATABASE_URL:
+        try:
+            ensure_delivery_schema()
+        except Exception as exc:
+            print(f"[luma] delivery schema check failed: {type(exc).__name__}: {exc}", flush=True)
+
 
 
 class BusinessCreate(BaseModel):
