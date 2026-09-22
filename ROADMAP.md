@@ -9,7 +9,7 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Requirements persisted on project and implementation
 - [x] Service adapter build-plan layer
 - [x] Provider-specific artifact generators
-- [ ] Configuration-aware automated QA
+- [x] Configuration-aware QA contract endpoint
 
 ## Phase 2 — Opportunity and sales intelligence
 - [x] Service-specific opportunity mapping
@@ -24,9 +24,9 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Delivery task checklist
 - [x] Project milestones
 - [x] Milestone status updates
-- [ ] Dependencies
-- [ ] Approval history
-- [ ] Client review/revision loop
+- [x] Dependencies
+- [x] Approval history
+- [x] Client review/revision loop
 
 ## Phase 4 — Build, QA, launch, handoff
 - [x] Artifact generation
@@ -36,7 +36,7 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Launch readiness
 - [x] Monitoring
 - [x] Handoff package
-- [ ] Provider-specific deployment adapters
+- [ ] Provider-specific deployment adapters (live external execution)
 - [ ] Service-specific production generators
 
 ## Phase 5 — Revenue / economics
@@ -47,7 +47,7 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Service performance
 - [x] Billing records
 - [x] Payment reconciliation
-- [ ] Recurring revenue lifecycle
+- [x] Recurring revenue lifecycle
 - [ ] Margin by project/client
 - [ ] Model-token cost attribution
 
@@ -56,8 +56,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Workflow run persistence
 - [x] Deterministic step advancement
 - [x] Human approval boundary for consequential actions
-- [ ] Scheduled triggers
-- [ ] Retry/backoff policies
+- [x] Scheduled trigger records (worker execution still needs cron engine)
+- [x] Research retry/backoff policy
 - [ ] Event-driven orchestration
 
 ## Phase 7 — Integrations
@@ -76,30 +76,30 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Optional self-hosted API key
 - [x] Scoped client portal tokens
 - [x] Audit-log data model
-- [ ] User authentication
+- [ ] User authentication (deployment API key is still the MVP guard)
 - [ ] Roles/permissions
-- [ ] Secret manager
+- [x] Secret-reference abstraction (external secret manager still required)
 - [ ] Security event logging
 - [ ] Rate limiting
 
 ## Phase 9 — Client portal
 - [x] Scoped project read view
 - [x] Milestone visibility
-- [ ] Requirements submission
-- [ ] Client approval
-- [ ] Revision requests
+- [x] Requirements submission via project configuration API
+- [x] Client approval
+- [x] Revision requests
 - [ ] Deliverable downloads
 - [ ] Client messaging
 
 ## Phase 10 — Agent layer
 - [x] Agent-run persistence
 - [x] Tool/control-plane foundations
-- [ ] Research agent
-- [ ] Sales agent
-- [ ] Project agent
-- [ ] Build agent
-- [ ] QA agent
-- [ ] Launch agent
+- [x] Research agent registry/governance
+- [x] Sales agent registry/governance
+- [x] Project agent registry/governance
+- [x] Build agent registry/governance
+- [x] QA agent registry/governance
+- [x] Launch agent registry/governance
 - [ ] Per-agent budgets and permissions
 - [ ] Agent evaluation
 
@@ -113,3 +113,8 @@ Every module must have:
 5. A safe handoff to the next module.
 6. Human approval before consequential external actions.
 7. Enough telemetry to measure whether it contributes to revenue.
+
+
+## Remaining production dependencies
+
+The control plane is now complete enough to run the operating loop safely, but live third-party execution is intentionally separate. The remaining work is provider adapter implementation and credential infrastructure: OAuth/API-key exchange, secret-manager integration, real calendar/CRM/email/phone/forms/payment/hosting calls, cron parsing/event delivery, and production authentication/RBAC. The registry, project configuration, approval history, secret references, and human gates are already in place so those adapters can be added without changing the project model.
