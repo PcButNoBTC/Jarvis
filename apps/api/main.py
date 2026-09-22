@@ -47,23 +47,81 @@ def health():
 
 @app.get("/dashboard")
 def dashboard():
-    queries = {
-        "businesses": "SELECT count(*) FROM businesses",
-        "opportunities": "SELECT count(*) FROM opportunities",
-        "proposals": "SELECT count(*) FROM proposals",
-        "clients": "SELECT count(*) FROM clients",
-        "projects": "SELECT count(*) FROM projects",
-    }
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                result = {}
-                for key, query in queries.items():
+                counts = {}
+                for key, query in {
+                    "businesses": "SELECT count(*) FROM businesses",
+                    "opportunities": "SELECT count(*) FROM opportunities",
+                    "proposals": "SELECT count(*) FROM proposals",
+                    "clients": "SELECT count(*) FROM clients",
+                    "projects": "SELECT count(*) FROM projects",
+                    "open_tasks": "SELECT count(*) FROM tasks WHERE status NOT IN ('done', 'completed')",
+                }.items():
                     cur.execute(query)
-                    result[key] = cur.fetchone()["count"]
-                return result
+                    counts[key] = cur.fetchone()["count"]
+
+                cur.execute("""
+                    SELECT COALESCE(SUM(estimated_value_max), 0) AS pipeline_value
+                    FROM opportunities
+                    WHERE status NOT IN ('won', 'lost', 'rejected')
+                """)
+                counts["pipeline_value"] = float(cur.fetchone()["pipeline_value"] or 0)
+
+                cur.execute("""
+                    SELECT COALESCE(SUM(total_amount), 0) AS won_revenue
+                    FROM proposals
+                    WHERE status = 'accepted'
+                """)
+                counts["won_revenue"] = float(cur.fetchone()["won_revenue"] or 0)
+
+                cur.execute("""
+                    SELECT o.id, o.title, o.status, o.score, o.estimated_value_min,
+                           o.estimated_value_max, o.next_action, b.name AS business_name,
+                           s.name AS service_name
+                    FROM opportunities o
+                    JOIN businesses b ON b.id = o.business_id
+                    LEFT JOIN services s ON s.id = o.service_id
+                    WHERE o.status NOT IN ('won', 'lost', 'rejected')
+                    ORDER BY o.score DESC NULLS LAST, o.created_at DESC
+                    LIMIT 10
+                """)
+                counts["opportunities_queue"] = cur.fetchall()
+
+                cur.execute("""
+                    SELECT p.id, p.name, p.status, p.agreed_price, p.recurring_price,
+                           p.start_date, p.target_date,
+                           b.name AS business_name
+                    FROM projects p
+                    JOIN clients c ON c.id = p.client_id
+                    JOIN businesses b ON b.id = c.business_id
+                    WHERE p.status NOT IN ('completed', 'cancelled')
+                    ORDER BY p.created_at DESC
+                    LIMIT 10
+                """)
+                counts["active_projects"] = cur.fetchall()
+
+                cur.execute("""
+                    SELECT t.id, t.title, t.description, t.status, t.priority, t.due_at,
+                           p.name AS project_name, b.name AS business_name
+                    FROM tasks t
+                    JOIN projects p ON p.id = t.project_id
+                    JOIN clients c ON c.id = p.client_id
+                    JOIN businesses b ON b.id = c.business_id
+                    WHERE t.status NOT IN ('done', 'completed')
+                    ORDER BY CASE t.priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
+                             t.due_at NULLS LAST, t.created_at
+                    LIMIT 12
+                """)
+                counts["tasks"] = cur.fetchall()
+                return counts
     except Exception:
-        return {key: 0 for key in queries}
+        return {
+            "businesses": 0, "opportunities": 0, "proposals": 0, "clients": 0,
+            "projects": 0, "open_tasks": 0, "pipeline_value": 0,
+            "won_revenue": 0, "opportunities_queue": [], "active_projects": [], "tasks": []
+        }
 
 
 @app.post("/businesses")
@@ -512,6 +570,27 @@ def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
                 "project_id": project_id,
                 "created_tasks": len(tasks),
             }
+
+
+class TaskStatusUpdate(BaseModel):
+    status: str
+
+
+@app.patch("/tasks/{task_id}/status")
+def update_task_status(task_id: str, payload: TaskStatusUpdate):
+    allowed = {"todo", "in_progress", "blocked", "done", "completed"}
+    if payload.status not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid task status")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE tasks SET status = %s WHERE id = %s RETURNING *",
+                (payload.status, task_id),
+            )
+            task = cur.fetchone()
+            if not task:
+                raise HTTPException(status_code=404, detail="Task not found")
+            return task
 
 
 @app.post("/projects/{project_id}/start")
