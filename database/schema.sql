@@ -206,3 +206,11 @@ INSERT INTO services (name, description, price_min, price_max, delivery_days) VA
 ('Video Walkthrough','Short business/property/service walkthrough video',250,1500,5),
 ('Custom Automation','Custom workflow automation scoped to a measurable business problem',750,5000,14)
 ON CONFLICT (name) DO NOTHING;
+
+CREATE INDEX IF NOT EXISTS idx_businesses_status ON businesses(status);
+CREATE INDEX IF NOT EXISTS idx_opportunities_status_score ON opportunities(status, score DESC);
+CREATE INDEX IF NOT EXISTS idx_activities_opportunity_created ON activities(opportunity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_due ON tasks(status, due_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_business_source_external_id
+  ON businesses(source, source_external_id)
+  WHERE source IS NOT NULL AND source_external_id IS NOT NULL;
