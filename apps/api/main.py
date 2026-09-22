@@ -68,6 +68,11 @@ class OutreachDraftUpdate(BaseModel):
     status: str | None = None
 
 
+class ProjectOptionUpdate(BaseModel):
+    options: dict = {}
+
+
+
 @app.get("/")
 def root():
     return {"name": "Luma", "version": "0.6.0", "status": "running"}
@@ -86,6 +91,39 @@ def health():
             db = f"error: {type(exc).__name__}"
     return {"status": "ok", "database": db}
 
+
+@app.get("/projects/{project_id}/options")
+def get_project_options(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project, _ = _delivery_project(cur, project_id)
+            cur.execute("SELECT settings FROM launch_settings WHERE project_id=%s", (project_id,))
+            row = cur.fetchone()
+            saved = row["settings"] if row else {}
+            service = project.get("service_name")
+            options = {
+                "hosting": ["client_hosting", "cloudflare_pages", "vercel", "netlify", "self_hosted", "custom"] if service == "AI Website" else [],
+                "communication": ["email", "phone", "client_managed"],
+                "analytics": ["none", "plausible", "google_analytics", "custom"],
+                "handoff": ["digital_package", "client_walkthrough", "live_activation"],
+            }
+            return {"project_id": project_id, "service": service, "options": options, "selected": saved}
+
+@app.post("/projects/{project_id}/options")
+def save_project_options(project_id: str, payload: ProjectOptionUpdate):
+    allowed = {"hosting_option", "communication", "analytics", "handoff", "provider_selected", "delivery_destination"}
+    options = {str(k): v for k, v in payload.options.items() if k in allowed}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT settings FROM launch_settings WHERE project_id=%s", (project_id,))
+            row = cur.fetchone()
+            current = row["settings"] if row else {}
+            current.update(options)
+            cur.execute("""INSERT INTO launch_settings (project_id, settings, ready, updated_at)
+                           VALUES (%s, %s::jsonb, false, now())
+                           ON CONFLICT (project_id) DO UPDATE SET settings=EXCLUDED.settings, updated_at=now()
+                           RETURNING settings""", (project_id, json.dumps(current)))
+            return {"project_id": project_id, "options": cur.fetchone()["settings"]}
 
 @app.get("/dashboard")
 def dashboard():
