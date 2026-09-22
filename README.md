@@ -453,3 +453,42 @@ This keeps Luma modular: it does not assume every client needs the same hosting 
 - Strengthen sales follow-up and pipeline transitions.
 - Expand service-specific delivery templates and QA.
 - Add revenue/cost analytics tying model spend and delivery cost to generated revenue.
+
+
+## Strong MVP build sequence
+
+Luma is being advanced as one connected operating system rather than a collection of unrelated screens. The implementation sequence is:
+
+1. Delivery control plane — project configuration compiles into explicit build requirements and service adapters consume those requirements.
+2. Opportunity intelligence — evidence ledger, service-specific rationale, confidence, lifecycle, and next actions.
+3. Sales pipeline — proposal lifecycle, follow-up queue, versioning, and human approval gates.
+4. Project operations — milestones, dependencies, approvals, and activity history.
+5. Build / QA / launch — service-specific generators, validation, deployment adapters, monitoring, and handoff.
+6. Revenue loop — revenue transactions, delivery/AI costs, contribution, service performance, and revenue-per-operating-dollar.
+7. Automation — deterministic workflow runs with explicit human gates before consequential external actions.
+8. Integrations — provider-neutral connection records and a small set of real adapters.
+9. Security — optional self-hosted API-key protection now; user/role authorization and secret management next.
+10. Client portal — scoped project status, milestones, requirements, approvals, and handoff access.
+11. Billing — invoice/payment state linked to projects and revenue.
+12. Agent layer — specialized agents with tools, budgets, permissions, run history, and measurable outcomes.
+
+The goal of a strong MVP is not feature count. A module is considered strong when it has a clear job, persistent state, validation, an observable outcome, and a reliable handoff to the next module.
+
+### New operating APIs
+
+- GET /analytics/revenue — revenue, costs, contribution, and service performance
+- POST /analytics/revenue — record a revenue transaction
+- POST /analytics/costs — record an operating or delivery cost
+- GET /automation/workflows — workflow definitions and approval boundaries
+- POST /automation/runs — start a workflow run
+- PATCH /automation/runs/{id} — advance a workflow state
+- GET /integrations/providers — available provider declarations
+- GET /integrations / POST /integrations — connection records
+- POST /portal/access — create scoped client portal access
+- GET /portal/project/{id} — client-safe project/milestone view
+- GET /billing / POST /billing — invoice records
+- POST /billing/{id}/paid — reconcile a payment into revenue
+
+### Self-hosted security
+
+Set LUMA_API_KEY in production. When it is set, API routes require the X-Luma-Key header; health and root endpoints remain available for infrastructure checks. The worker can use the same key. This is a lightweight deployment guard, not a replacement for full user/role authentication.
