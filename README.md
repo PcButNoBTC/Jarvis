@@ -129,6 +129,7 @@ docker compose up --build
 | API health | `http://localhost:8000/health` |
 | API root | `http://localhost:8000/` |
 | Dashboard | `http://localhost:3000` |
+| Deployment preview | `http://localhost:8080` |
 
 ---
 
