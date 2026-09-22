@@ -1,16 +1,27 @@
-"""Optional API-key protection for self-hosted Luma.
+"""Layered self-hosted API authentication.
 
-If LUMA_API_KEY is unset, local development remains open. In a real deployment,
-set a strong key and place Luma behind TLS. This is intentionally simple until
-full user/role authentication is introduced.
+LUMA_API_KEY remains a deployment-level emergency key. User sessions use signed
+Bearer tokens and roles. Portal token routes remain separately scoped.
 """
-import os
-import secrets
+import os, secrets
+from auth import verify_token
 
-API_KEY = os.getenv("LUMA_API_KEY")
+API_KEY=os.getenv("LUMA_API_KEY")
+PUBLIC_PATHS={"/","/health","/auth/login","/docs","/openapi.json","/redoc"}
 
-
-def authorized(provided: str | None) -> bool:
+def authorized(provided):
     if not API_KEY:
-        return True
+        return False
     return bool(provided) and secrets.compare_digest(provided, API_KEY)
+
+def authenticate(api_key=None, bearer=None):
+    if API_KEY and authorized(api_key):
+        return {"sub":"api-key","role":"owner","email":"api-key"}
+    if bearer:
+        return verify_token(bearer)
+    if not API_KEY and not bearer:
+        return {"sub":"local","role":"owner","email":"local"}
+    return None
+
+def can(role, *allowed):
+    return role in set(allowed)
