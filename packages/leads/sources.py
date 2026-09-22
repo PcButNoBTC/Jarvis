@@ -38,3 +38,30 @@ def dedupe_key(prospect: Prospect) -> tuple[str, str]:
     if domain:
         return ("domain", domain)
     return ("name", prospect.name.strip().lower())
+
+
+
+def parse_csv_prospects(csv_text: str) -> list[Prospect]:
+    import csv
+    from io import StringIO
+
+    reader = csv.DictReader(StringIO(csv_text))
+    if not reader.fieldnames or "name" not in {h.strip().lower() for h in reader.fieldnames if h}:
+        raise ValueError("CSV must include a name column")
+
+    result = []
+    for row in reader:
+        normalized = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        if not normalized.get("name"):
+            continue
+        result.append(Prospect(
+            name=normalized["name"],
+            website_url=normalized.get("website_url") or normalized.get("website"),
+            industry=normalized.get("industry"),
+            phone=normalized.get("phone"),
+            email=normalized.get("email"),
+            source="csv",
+            source_external_id=normalized.get("source_external_id") or normalized.get("id"),
+            notes=normalized.get("notes"),
+        ))
+    return result
