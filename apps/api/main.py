@@ -219,6 +219,30 @@ def ingest_prospect(payload: ProspectIngest):
             return {"action":"created","business":cur.fetchone()}
 
 
+
+
+
+@app.post("/prospects/ingest-batch")
+def ingest_prospects_batch(payload: list[ProspectIngest]):
+    if not payload:
+        raise HTTPException(status_code=400, detail="Prospect batch is empty")
+    if len(payload) > 100:
+        raise HTTPException(status_code=400, detail="Maximum batch size is 100")
+    results = []
+    for prospect in payload:
+        result = ingest_prospect(prospect)
+        business = result["business"]
+        queued = None
+        if business.get("website_url"):
+            queued = enqueue_research(str(business["id"]), ResearchEnqueue(priority=50))
+        results.append({
+            "action": result["action"],
+            "business_id": business["id"],
+            "research_job_id": queued["id"] if queued else None,
+        })
+    return {"count": len(results), "results": results}
+
+
 @app.post("/businesses/{business_id}/research")
 def enqueue_research(business_id: str, payload: ResearchEnqueue | None = None):
     priority = max(0, min((payload or ResearchEnqueue()).priority, 100))
@@ -299,9 +323,13 @@ def run_research_job(job_id: str):
     except Exception as exc:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("""UPDATE research_jobs SET status='failed',last_error=%s,
+                cur.execute("""SELECT attempts FROM research_jobs WHERE id=%s""",(job_id,))
+                current=cur.fetchone()
+                attempts=current["attempts"] if current else 3
+                next_status="pending" if attempts < 3 else "failed"
+                cur.execute("""UPDATE research_jobs SET status=%s,last_error=%s,
                                locked_at=NULL,updated_at=now() WHERE id=%s""",
-                            (f"{type(exc).__name__}: {exc}",job_id))
+                            (next_status,f"{type(exc).__name__}: {exc}",job_id))
         raise HTTPException(status_code=500, detail="Research job failed")
 
 
