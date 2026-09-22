@@ -75,6 +75,66 @@ def ensure_delivery_schema():
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       completed_at TIMESTAMPTZ
     );
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS confidence NUMERIC(5,2);
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS rationale TEXT;
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS factors JSONB NOT NULL DEFAULT '[]';
+    CREATE INDEX IF NOT EXISTS idx_opportunities_business_service ON opportunities(business_id, service_id);
+    CREATE TABLE IF NOT EXISTS evidence_items (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      research_report_id UUID REFERENCES research_reports(id) ON DELETE CASCADE, opportunity_id UUID REFERENCES opportunities(id) ON DELETE SET NULL,
+      evidence_type TEXT NOT NULL, observation TEXT NOT NULL, source_url TEXT, source_locator TEXT,
+      confidence NUMERIC(5,2), observed_at TIMESTAMPTZ NOT NULL DEFAULT now(), metadata JSONB NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_evidence_business_observed ON evidence_items(business_id, observed_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_evidence_opportunity ON evidence_items(opportunity_id);
+    CREATE TABLE IF NOT EXISTS project_milestones (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', sequence INT NOT NULL DEFAULT 0,
+      due_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, metadata JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_milestones_project ON project_milestones(project_id, sequence);
+    CREATE TABLE IF NOT EXISTS revenue_transactions (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
+      project_id UUID REFERENCES projects(id) ON DELETE SET NULL, proposal_id UUID REFERENCES proposals(id) ON DELETE SET NULL,
+      transaction_type TEXT NOT NULL DEFAULT 'sale', status TEXT NOT NULL DEFAULT 'pending',
+      amount NUMERIC(12,2) NOT NULL DEFAULT 0, recurring_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD', external_id TEXT, occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(), metadata JSONB NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_revenue_transactions_occurred ON revenue_transactions(occurred_at DESC);
+    CREATE TABLE IF NOT EXISTS cost_records (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+      agent_run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL, category TEXT NOT NULL,
+      amount NUMERIC(12,6) NOT NULL DEFAULT 0, currency TEXT NOT NULL DEFAULT 'USD',
+      description TEXT, occurred_at TIMESTAMPTZ NOT NULL DEFAULT now(), metadata JSONB NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_cost_records_occurred ON cost_records(occurred_at DESC);
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), workflow_name TEXT NOT NULL, trigger_type TEXT NOT NULL,
+      entity_type TEXT, entity_id UUID, status TEXT NOT NULL DEFAULT 'pending', current_step TEXT,
+      attempts INT NOT NULL DEFAULT 0, input JSONB NOT NULL DEFAULT '{}', output JSONB NOT NULL DEFAULT '{}',
+      error TEXT, started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_runs_queue ON workflow_runs(status, created_at);
+    CREATE TABLE IF NOT EXISTS integration_connections (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+      project_id UUID REFERENCES projects(id) ON DELETE CASCADE, provider TEXT NOT NULL, category TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending', capabilities JSONB NOT NULL DEFAULT '[]', secret_ref TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}', connected_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_integrations_project ON integration_connections(project_id, status);
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), actor_type TEXT NOT NULL, actor_id UUID, action TEXT NOT NULL,
+      entity_type TEXT, entity_id UUID, metadata JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity_type, entity_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS billing_records (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
+      project_id UUID REFERENCES projects(id) ON DELETE SET NULL, proposal_id UUID REFERENCES proposals(id) ON DELETE SET NULL,
+      external_invoice_id TEXT, status TEXT NOT NULL DEFAULT 'draft', amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD', due_at TIMESTAMPTZ, paid_at TIMESTAMPTZ, metadata JSONB NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_billing_status_due ON billing_records(status, due_at);
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
