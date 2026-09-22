@@ -20,3 +20,17 @@ def test_score_caps_at_100():
         "response_time_ms": 5000,
     })
     assert result["score"] == 95
+
+
+def test_score_flags_missing_conversion_signals():
+    result = score_opportunity({
+        "https": True,
+        "has_mobile_viewport": True,
+        "has_contact_form": False,
+        "has_phone_link": True,
+        "has_cta": False,
+        "has_email_link": False,
+    })
+    factors = {f["factor"] for f in result["factors"]}
+    assert "no_clear_cta_observed" in factors
+    assert "no_email_or_contact_form_observed" in factors
