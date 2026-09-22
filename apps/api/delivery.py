@@ -132,7 +132,18 @@ li{{margin:10px 0}}
         f"Original website, if supplied: {website or 'not supplied'}\n",
         encoding="utf-8",
     )
-    return ["site/index.html", "README.md"]
+    (workspace / "DEPLOY.md").write_text(
+        "# Deployment checklist\n\n"
+        "- [ ] Confirm approved production copy and assets\n"
+        "- [ ] Configure the server document root to the site directory\n"
+        "- [ ] Configure DNS for the approved domain\n"
+        "- [ ] Enable HTTPS\n"
+        "- [ ] Verify the production URL\n"
+        "- [ ] Test the contact path\n"
+        "- [ ] Record the final production URL in the project handoff\n",
+        encoding="utf-8",
+    )
+    return ["site/index.html", "README.md", "DEPLOY.md"]
 
 def _generate_workflow_package(workspace: Path, project: dict[str, Any], service: dict[str, Any], req: dict[str, Any]) -> list[str]:
     spec = {
