@@ -1225,6 +1225,16 @@ def generate_project_delivery(project_id: str):
             project, implementation = _delivery_project(cur, project_id)
             if implementation["status"] == "approved":
                 raise HTTPException(status_code=409, detail="Approved implementation cannot be regenerated")
+            service = project.get("service_name")
+            cur.execute("SELECT options FROM project_options WHERE project_id=%s", (project_id,))
+            option_row = cur.fetchone()
+            selected = option_row["options"] if option_row else {}
+            missing = validate_options(service, selected)
+            if missing:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"message": "Complete project configuration before build", "missing_options": missing},
+                )
             project["requirements"] = implementation.get("requirements") or {}
     result = generate_project(project)
     with get_conn() as conn:
