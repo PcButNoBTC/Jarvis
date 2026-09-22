@@ -193,3 +193,216 @@ def qualify(payload: dict):
     if not isinstance(analysis, dict):
         raise HTTPException(status_code=400, detail="analysis object is required")
     return score_opportunity(analysis, payload.get("service_name"))
+
+
+from sales import build_call_prep, build_proposal_content
+
+
+def _get_opportunity(cur, opportunity_id: str):
+    cur.execute(
+        """SELECT o.*, b.name AS business_name, b.website_url, b.industry,
+                  s.name AS service_name, s.description AS service_description,
+                  s.price_min, s.price_max, s.delivery_days
+           FROM opportunities o
+           JOIN businesses b ON b.id = o.business_id
+           LEFT JOIN services s ON s.id = o.service_id
+           WHERE o.id = %s""",
+        (opportunity_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Opportunity not found")
+    return row
+
+
+@app.get("/opportunities")
+def list_opportunities(status: str | None = None, limit: int = 50):
+    limit = max(1, min(limit, 200))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if status:
+                cur.execute(
+                    """SELECT o.*, b.name AS business_name, s.name AS service_name
+                       FROM opportunities o
+                       JOIN businesses b ON b.id = o.business_id
+                       LEFT JOIN services s ON s.id = o.service_id
+                       WHERE o.status = %s
+                       ORDER BY o.score DESC NULLS LAST, o.created_at DESC LIMIT %s""",
+                    (status, limit),
+                )
+            else:
+                cur.execute(
+                    """SELECT o.*, b.name AS business_name, s.name AS service_name
+                       FROM opportunities o
+                       JOIN businesses b ON b.id = o.business_id
+                       LEFT JOIN services s ON s.id = o.service_id
+                       ORDER BY o.score DESC NULLS LAST, o.created_at DESC LIMIT %s""",
+                    (limit,),
+                )
+            return cur.fetchall()
+
+
+@app.get("/opportunities/{opportunity_id}")
+def get_opportunity(opportunity_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            opportunity = _get_opportunity(cur, opportunity_id)
+            cur.execute(
+                "SELECT * FROM activities WHERE opportunity_id = %s ORDER BY created_at DESC LIMIT 50",
+                (opportunity_id,),
+            )
+            opportunity["activities"] = cur.fetchall()
+            return opportunity
+
+
+@app.post("/opportunities/{opportunity_id}/prepare-call")
+def prepare_call(opportunity_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            opportunity = _get_opportunity(cur, opportunity_id)
+            prep = build_call_prep(opportunity)
+            cur.execute(
+                """INSERT INTO activities
+                   (business_id, opportunity_id, type, subject, content, metadata)
+                   VALUES (%s, %s, 'call_prep', %s, %s, %s::jsonb)
+                   RETURNING id""",
+                (
+                    opportunity["business_id"], opportunity_id,
+                    "Sales call preparation", json.dumps(prep),
+                    json.dumps({"generated_by": "deterministic-template", "version": "sales-cockpit-v1"}),
+                ),
+            )
+            activity_id = cur.fetchone()["id"]
+            cur.execute(
+                """UPDATE opportunities
+                   SET status = CASE WHEN status = 'qualified' THEN 'contact_pending' ELSE status END,
+                       next_action = 'Review call prep and approve outreach', updated_at = now()
+                   WHERE id = %s""",
+                (opportunity_id,),
+            )
+            return {"opportunity_id": opportunity_id, "activity_id": activity_id, "call_prep": prep}
+
+
+@app.post("/opportunities/{opportunity_id}/create-offer")
+def create_offer(opportunity_id: str, payload: dict | None = None):
+    payload = payload or {}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            opportunity = _get_opportunity(cur, opportunity_id)
+            service_name = payload.get("service_name") or opportunity.get("service_name") or "Custom Automation"
+            cur.execute("SELECT * FROM services WHERE name = %s AND active = true", (service_name,))
+            service = cur.fetchone()
+            if not service:
+                raise HTTPException(status_code=400, detail="Active service not found: " + service_name)
+
+            setup_price = payload.get("setup_price")
+            if setup_price is None:
+                setup_price = float(service["price_min"] or 0)
+            recurring_price = payload.get("recurring_price")
+            name = payload.get("name") or "{} — {}".format(service["name"], opportunity["business_name"])
+            deliverables = [
+                "Discovery and requirements confirmation for " + service["name"],
+                "Configured implementation of the agreed scope",
+                "Basic testing and handoff",
+            ]
+            assumptions = [
+                "Client provides required access, content, and approvals.",
+                "Scope remains within the agreed deliverables.",
+            ]
+            exclusions = [
+                "Unscoped third-party licenses or usage fees.",
+                "Material scope changes after approval.",
+            ]
+            cur.execute(
+                """INSERT INTO offers
+                   (opportunity_id, service_id, name, description, setup_price,
+                    recurring_price, deliverables, assumptions, exclusions)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
+                   RETURNING *""",
+                (
+                    opportunity_id, service["id"], name, service["description"],
+                    setup_price, recurring_price, json.dumps(deliverables),
+                    json.dumps(assumptions), json.dumps(exclusions),
+                ),
+            )
+            offer = cur.fetchone()
+            cur.execute(
+                """UPDATE opportunities
+                   SET status = 'proposal', next_action = 'Review offer and approve proposal draft',
+                       updated_at = now()
+                   WHERE id = %s""",
+                (opportunity_id,),
+            )
+            return offer
+
+
+@app.post("/proposals")
+def create_proposal(payload: dict):
+    opportunity_id = payload.get("opportunity_id")
+    offer_id = payload.get("offer_id")
+    if not opportunity_id or not offer_id:
+        raise HTTPException(status_code=400, detail="opportunity_id and offer_id are required")
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            opportunity = _get_opportunity(cur, opportunity_id)
+            cur.execute(
+                """SELECT o.*, s.delivery_days
+                   FROM offers o LEFT JOIN services s ON s.id = o.service_id
+                   WHERE o.id = %s AND o.opportunity_id = %s""",
+                (offer_id, opportunity_id),
+            )
+            offer = cur.fetchone()
+            if not offer:
+                raise HTTPException(status_code=404, detail="Offer not found for opportunity")
+
+            content = build_proposal_content(opportunity["business_name"], offer, opportunity)
+            cur.execute(
+                """INSERT INTO proposals
+                   (opportunity_id, offer_id, title, status, total_amount,
+                    recurring_amount, content, expires_at)
+                   VALUES (%s, %s, %s, 'draft', %s, %s, %s, CURRENT_DATE + 14)
+                   RETURNING *""",
+                (
+                    opportunity_id, offer_id, offer["name"], offer["setup_price"],
+                    offer["recurring_price"], content,
+                ),
+            )
+            proposal = cur.fetchone()
+            cur.execute(
+                """INSERT INTO activities
+                   (business_id, opportunity_id, type, subject, content, metadata)
+                   VALUES (%s, %s, 'proposal_draft', %s, %s, %s::jsonb)""",
+                (
+                    opportunity["business_id"], opportunity_id,
+                    "Proposal draft created", content,
+                    json.dumps({"proposal_id": str(proposal["id"]), "version": "proposal-v1"}),
+                ),
+            )
+            return proposal
+
+
+@app.get("/proposals")
+def list_proposals(status: str | None = None, limit: int = 50):
+    limit = max(1, min(limit, 200))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if status:
+                cur.execute(
+                    """SELECT p.*, b.name AS business_name
+                       FROM proposals p
+                       LEFT JOIN opportunities o ON o.id = p.opportunity_id
+                       LEFT JOIN businesses b ON b.id = o.business_id
+                       WHERE p.status = %s ORDER BY p.created_at DESC LIMIT %s""",
+                    (status, limit),
+                )
+            else:
+                cur.execute(
+                    """SELECT p.*, b.name AS business_name
+                       FROM proposals p
+                       LEFT JOIN opportunities o ON o.id = p.opportunity_id
+                       LEFT JOIN businesses b ON b.id = o.business_id
+                       ORDER BY p.created_at DESC LIMIT %s""",
+                    (limit,),
+                )
+            return cur.fetchall()
