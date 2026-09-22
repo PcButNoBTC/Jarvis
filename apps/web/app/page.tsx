@@ -157,9 +157,9 @@ export default function Home() {
             Only recommend what you observed
           </h1>
           <p style={{ margin: 0, color: "#64748b", maxWidth: 560, lineHeight: 1.5 }}>
-            Research a site, turn signals into clear service opportunities, draft
-            respectful outreach, and share a one-page brief clients can understand.
-            Nothing sends without your approval.
+            Research a site, turn signals into service opportunities, sell the work,
+            generate the implementation, validate it, and prepare launch and handoff.
+            Nothing external sends or deploys without approval.
           </p>
         </div>
         <button
@@ -360,6 +360,12 @@ export default function Home() {
                   <div style={{ color: "#334155" }}>{p.name}</div>
                   <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
                     {p.status} · {money(p.agreed_price)}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                    <span style={badge}>Build: {p.implementation_status || "requirements"}</span>
+                    {p.validated_at && <span style={badge}>QA passed</span>}
+                    {p.approved_at && <span style={badge}>Approved</span>}
+                    {p.handoff_status && <span style={badge}>Handoff: {p.handoff_status}</span>}
                   </div>
                 </div>
               ))
