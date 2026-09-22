@@ -1223,7 +1223,7 @@ def approve_project_delivery(project_id: str, payload: DeliveryApproval):
 
 
 @app.post("/projects/{project_id}/deploy")
-def deploy_project_delivery(project_id: str, target_root: str | None = None):
+def deploy_project_delivery(project_id: str):
     with get_conn() as conn:
         with conn.cursor() as cur:
             project, implementation = _delivery_project(cur, project_id)
@@ -1238,7 +1238,7 @@ def deploy_project_delivery(project_id: str, target_root: str | None = None):
             run = cur.fetchone()
     project["requirements"] = implementation.get("requirements") or project.get("requirements") or {}
     try:
-        result = deploy_static(project, target_root)
+        result = deploy_static(project)
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
