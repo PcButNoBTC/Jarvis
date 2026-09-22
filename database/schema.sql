@@ -298,3 +298,12 @@ CREATE TABLE IF NOT EXISTS launch_settings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_launch_settings_ready ON launch_settings(ready);
+
+CREATE TABLE IF NOT EXISTS project_options (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  options JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_options_project ON project_options(project_id);
