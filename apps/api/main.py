@@ -494,6 +494,8 @@ def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
             proposal = cur.fetchone()
             if not proposal:
                 raise HTTPException(status_code=404, detail="Proposal not found")
+            if proposal["status"] == "accepted" and payload.status == "accepted":
+                raise HTTPException(status_code=409, detail="Proposal is already accepted")
 
             if payload.status == "accepted":
                 cur.execute(
@@ -503,8 +505,11 @@ def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
                 )
             else:
                 cur.execute(
-                    "UPDATE proposals SET status = %s WHERE id = %s RETURNING *",
-                    (payload.status, proposal_id),
+                    """UPDATE proposals
+                       SET status = %s,
+                           sent_at = CASE WHEN %s = 'sent' THEN COALESCE(sent_at, now()) ELSE sent_at END
+                       WHERE id = %s RETURNING *""",
+                    (payload.status, payload.status, proposal_id),
                 )
             updated = cur.fetchone()
 
