@@ -1001,6 +1001,12 @@ def update_proposal_status(proposal_id: str, payload: ProposalStatusUpdate):
                 raise HTTPException(status_code=404, detail="Proposal not found")
             if proposal["status"] == "accepted" and payload.status == "accepted":
                 raise HTTPException(status_code=409, detail="Proposal is already accepted")
+            if proposal["status"] in {"rejected", "expired"} and payload.status == "accepted":
+                raise HTTPException(status_code=409, detail="A rejected or expired proposal cannot be accepted")
+            if payload.status == "accepted":
+                cur.execute("SELECT id FROM projects WHERE opportunity_id = %s LIMIT 1", (proposal["opportunity_id"],))
+                if cur.fetchone():
+                    raise HTTPException(status_code=409, detail="A project already exists for this opportunity")
 
             if payload.status == "accepted":
                 cur.execute(
