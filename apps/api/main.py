@@ -2433,3 +2433,27 @@ def portal_revision(project_id: str, token: str, payload: dict):
             revision = cur.fetchone()
             cur.execute("UPDATE client_portal_access SET last_used_at=now() WHERE id=%s", (access["id"],))
             return revision
+
+
+@app.post("/integrations/{integration_id}/verify")
+def verify_integration(integration_id: str, payload: dict):
+    if payload.get("approved") is not True:
+        raise HTTPException(status_code=400, detail="Explicit approved=true is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE integration_connections
+                   SET status='verified', connected_at=COALESCE(connected_at,now()),
+                       metadata=metadata || %s::jsonb
+                   WHERE id=%s RETURNING *""",
+                (json.dumps({"verified_by": payload.get("verified_by", "human"), "verification_note": payload.get("note")}), integration_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Integration not found")
+            cur.execute(
+                """INSERT INTO audit_log (actor_type, action, entity_type, entity_id, metadata)
+                   VALUES ('human','integration_verified','integration_connection',%s,%s::jsonb)""",
+                (integration_id, json.dumps({"provider": row["provider"], "category": row["category"]})),
+            )
+            return row
