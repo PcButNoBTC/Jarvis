@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-USER_AGENT = "Jarvis/0.1 (+business-research)"
+USER_AGENT = "Luma/0.1 (+business-research)"
 
 def analyze_website(url: str) -> dict:
     original = url.strip()
