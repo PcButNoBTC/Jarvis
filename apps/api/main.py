@@ -92,7 +92,7 @@ class ProjectOptionUpdate(BaseModel):
 
 @app.get("/")
 def root():
-    return {"name": "Luma", "version": "0.6.0", "status": "running"}
+    return {"name": "Luma", "version": "0.7.0", "status": "running"}
 
 
 @app.get("/health")
@@ -140,8 +140,27 @@ def save_project_options(project_id: str, payload: ProjectOptionUpdate):
                            RETURNING options""", (project_id, json.dumps(current)))
             selected = cur.fetchone()["options"]
             missing = validate_options(service, selected)
+            compiled = None
+            if not missing:
+                try:
+                    compiled = compile_requirements(service, selected)
+                    cur.execute(
+                        """UPDATE implementations
+                           SET requirements=%s::jsonb,
+                               status=CASE WHEN status IN ('deployed','complete') THEN status ELSE 'requirements' END,
+                               updated_at=now()
+                           WHERE project_id=%s""",
+                        (json.dumps(compiled), project_id),
+                    )
+                    cur.execute(
+                        "UPDATE projects SET requirements=%s::jsonb WHERE id=%s",
+                        (json.dumps(compiled), project_id),
+                    )
+                except ValueError:
+                    compiled = None
             return {"project_id": project_id, "service": service, "options": definitions, "selected": selected,
                     "validation": {"missing": missing, "complete": not missing},
+                    "compiled_requirements": compiled,
                     "summary": option_summary(service, selected)}
 
 @app.get("/projects/{project_id}/configuration")
