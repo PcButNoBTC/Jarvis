@@ -186,6 +186,12 @@ def ensure_delivery_schema():
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), revoked_at TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS idx_secret_references_owner ON secret_references(owner_type, owner_id, status);
+    CREATE TABLE IF NOT EXISTS users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'operator', active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_login_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_users_role_active ON users(role, active);
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
