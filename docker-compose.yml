@@ -20,6 +20,10 @@ services:
     build: ./apps/api
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://jarvis:change-me@db:5432/jarvis}
+      LUMA_DELIVERY_ROOT: /data/delivery
+      LUMA_DEPLOY_ROOT: /data/deploy
+    volumes:
+      - delivery_data:/data
     ports:
       - "8000:8000"
     depends_on:
@@ -29,10 +33,12 @@ services:
   worker:
     build: ./apps/worker
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://jarvis:change-me@db:5432/jarvis}
+      API_URL: http://api:8000
     depends_on:
       db:
         condition: service_healthy
+      api:
+        condition: service_started
 
   web:
     build: ./apps/web
@@ -45,3 +51,4 @@ services:
 
 volumes:
   postgres_data:
+  delivery_data:
