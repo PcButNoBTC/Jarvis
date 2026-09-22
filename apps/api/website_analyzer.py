@@ -30,6 +30,8 @@ def analyze_website(url: str) -> dict:
         "has_mobile_viewport": False,
         "has_contact_form": False,
         "has_phone_link": False,
+        "has_email_link": False,
+        "has_cta": False,
         "cms": None,
         "error": None,
     }
@@ -59,6 +61,8 @@ def analyze_website(url: str) -> dict:
                 token in lower for token in ("contact", "quote", "appointment", "inquiry")
             )
             result["has_phone_link"] = "tel:" in lower
+            result["has_email_link"] = "mailto:" in lower
+            result["has_cta"] = any(token in lower for token in ("request a quote", "get a quote", "book now", "schedule", "contact us", "get started"))
 
             cms_markers = {
                 "WordPress": ("wp-content", "wp-includes"),
