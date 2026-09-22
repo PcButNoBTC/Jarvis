@@ -179,6 +179,23 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS research_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  priority INT NOT NULL DEFAULT 50,
+  scheduled_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  attempts INT NOT NULL DEFAULT 0,
+  locked_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_research_business ON research_jobs(business_id) WHERE status IN ('pending','running');
+CREATE INDEX IF NOT EXISTS idx_research_jobs_queue ON research_jobs(status, priority DESC, scheduled_at, created_at);
+
 CREATE TABLE IF NOT EXISTS agent_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   agent_name TEXT NOT NULL,
@@ -211,6 +228,7 @@ CREATE INDEX IF NOT EXISTS idx_businesses_status ON businesses(status);
 CREATE INDEX IF NOT EXISTS idx_opportunities_status_score ON opportunities(status, score DESC);
 CREATE INDEX IF NOT EXISTS idx_activities_opportunity_created ON activities(opportunity_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_status_due ON tasks(status, due_at);
+CREATE INDEX IF NOT EXISTS idx_messages_outreach_queue ON messages(status, channel, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_business_source_external_id
   ON businesses(source, source_external_id)
   WHERE source IS NOT NULL AND source_external_id IS NOT NULL;
