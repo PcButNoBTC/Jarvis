@@ -25,8 +25,8 @@ def build_call_prep(opportunity: dict) -> dict:
 
 
 def build_proposal_content(business_name: str, offer: dict, opportunity: dict) -> str:
-    setup = ${:,.2f}.format(offer["setup_price"]) if offer.get("setup_price") is not None else "To be confirmed"
-    recurring = ${:,.2f}/month.format(offer["recurring_price"]) if offer.get("recurring_price") is not None else "None proposed"
+    setup = "$" + "{:,.2f}".format(offer["setup_price"]) if offer.get("setup_price") is not None else "To be confirmed"
+    recurring = "$" + "{:,.2f}/month".format(offer["recurring_price"]) if offer.get("recurring_price") is not None else "None proposed"
     deliverables = offer.get("deliverables") or []
     assumptions = offer.get("assumptions") or []
     exclusions = offer.get("exclusions") or []
