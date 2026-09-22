@@ -119,7 +119,9 @@ def get_project_options(project_id: str):
             cur.execute("SELECT options FROM project_options WHERE project_id=%s", (project_id,))
             row = cur.fetchone()
             selected = row["options"] if row else {}
-            missing = validate_options(service, selected)\n            return {"project_id": project_id, "service": service, "options": definitions, "definitions": definitions, "selected": selected,\n                    "validation": {"missing": missing, "complete": not missing}, "summary": option_summary(service, selected)}
+            missing = validate_options(service, selected)
+            return {"project_id": project_id, "service": service, "options": definitions, "definitions": definitions, "selected": selected,
+                    "validation": {"missing": missing, "complete": not missing}, "summary": option_summary(service, selected)}
 
 @app.post("/projects/{project_id}/options")
 def save_project_options(project_id: str, payload: ProjectOptionUpdate):
