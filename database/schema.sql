@@ -232,3 +232,58 @@ CREATE INDEX IF NOT EXISTS idx_messages_outreach_queue ON messages(status, chann
 CREATE UNIQUE INDEX IF NOT EXISTS uq_business_source_external_id
   ON businesses(source, source_external_id)
   WHERE source IS NOT NULL AND source_external_id IS NOT NULL;
+
+
+CREATE TABLE IF NOT EXISTS implementations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'requirements',
+  requirements JSONB NOT NULL DEFAULT '{}',
+  generated_at TIMESTAMPTZ,
+  validated_at TIMESTAMPTZ,
+  validation JSONB NOT NULL DEFAULT '{}',
+  preview_url TEXT,
+  approved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS delivery_artifacts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  implementation_id UUID REFERENCES implementations(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  path TEXT,
+  download_url TEXT,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS deployment_runs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  implementation_id UUID REFERENCES implementations(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  target TEXT,
+  approved_at TIMESTAMPTZ,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  output JSONB NOT NULL DEFAULT '{}',
+  error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS handoffs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  package_path TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  client_approved BOOLEAN NOT NULL DEFAULT false,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_implementations_status ON implementations(status);
+CREATE INDEX IF NOT EXISTS idx_deployment_runs_project ON deployment_runs(project_id, created_at DESC);
