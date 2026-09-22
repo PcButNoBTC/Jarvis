@@ -21,30 +21,17 @@ def run_cycle():
                 if result.status_code >= 400:
                     print(f"[luma-worker] job {job['id']}: {result.text}", flush=True)
 
-            schedules = client.get(f"{API_URL}/automation/schedules").json()
-            now = datetime.now(timezone.utc)
-            for schedule in schedules:
-                next_run = schedule.get("next_run_at")
-                if not schedule.get("enabled") or not next_run:
-                    continue
-                try:
-                    due = datetime.fromisoformat(next_run.replace("Z", "+00:00")) <= now
-                except (TypeError, ValueError):
-                    due = False
-                if due:
-                    run = client.post(f"{API_URL}/automation/runs", json={
-                        "workflow_name": schedule["workflow_name"],
-                        "trigger_type": "schedule",
-                        "input": schedule.get("input") or {},
-                    })
-                    if run.status_code < 400:
-                        client.patch(f"{API_URL}/automation/schedules/{schedule['id']}",
-                                     json={"last_run_at": now.isoformat()})
-    except Exception as exc:
-        print(f"[luma-worker] cycle error: {type(exc).__name__}: {exc}", flush=True)
-
-
-if __name__ == "__main__":
-    while True:
-        run_cycle()
-        time.sleep(POLL_SECONDS)
+            while True:
+                claim = client.post(f"{API_URL}/automation/schedules/claim")
+                claim.raise_for_status()
+                data = claim.json()
+                if not data.get("claimed"):
+                    break
+                schedule = data["schedule"]
+                run = client.post(f"{API_URL}/automation/runs", json={
+                    "workflow_name": schedule["workflow_name"],
+                    "trigger_type": "schedule",
+                    "input": schedule.get("input") or {},
+                })
+                if run.status_code >= 400:
+                    print(f"[luma-worker] schedule {schedule['id']}: {run.text}", flush=True)
