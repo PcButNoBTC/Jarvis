@@ -6,12 +6,13 @@ import httpx
 
 API_URL = os.getenv("API_URL", "http://api:8000")
 POLL_SECONDS = int(os.getenv("WORKER_POLL_SECONDS", "30"))
+LUMA_API_KEY = os.getenv("LUMA_API_KEY", "")
 
 
 def run_cycle():
     print(f"[luma-worker] cycle {datetime.now(timezone.utc).isoformat()}", flush=True)
     try:
-        with httpx.Client(timeout=20) as client:
+        with httpx.Client(timeout=20, headers={"X-Luma-Key": LUMA_API_KEY} if LUMA_API_KEY else {}) as client:
             response = client.get(f"{API_URL}/research/jobs", params={"status": "pending", "limit": 5})
             response.raise_for_status()
             for job in response.json():
