@@ -217,3 +217,16 @@ def deploy_static(project: dict[str, Any], target_root: str | None = None) -> di
         else:
             shutil.copy2(item, destination)
     return {"deployed": True, "target": str(target), "validation": validation}
+
+
+def check_live_url(url: str) -> dict:
+    import httpx
+    if not url:
+        raise ValueError("A production URL is required")
+    response = httpx.get(url, follow_redirects=True, timeout=8.0, headers={"User-Agent": "Luma/0.1 (+delivery-check)"})
+    return {
+        "url": str(response.url),
+        "status_code": response.status_code,
+        "healthy": 200 <= response.status_code < 400,
+        "content_type": response.headers.get("content-type"),
+    }
