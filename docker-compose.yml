@@ -23,7 +23,7 @@ services:
       LUMA_DELIVERY_ROOT: /data/delivery
       LUMA_DEPLOY_ROOT: /data/deploy
     volumes:
-      - delivery_data:/data
+      - ./data:/data
     ports:
       - "8000:8000"
     depends_on:
@@ -40,6 +40,13 @@ services:
       api:
         condition: service_started
 
+  preview:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./data/deploy:/usr/share/nginx/html:ro
+    ports:
+      - "8080:80"
+
   web:
     build: ./apps/web
     environment:
@@ -51,4 +58,3 @@ services:
 
 volumes:
   postgres_data:
-  delivery_data:
