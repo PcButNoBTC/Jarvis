@@ -129,3 +129,23 @@ def test_opportunities_sorted_by_score_desc():
     opps = map_to_service_opportunities(analysis)
     scores = [o["score"] for o in opps]
     assert scores == sorted(scores, reverse=True)
+
+
+def test_industry_bias_boosts_dental_services():
+    analysis = {
+        "https": True,
+        "has_mobile_viewport": True,
+        "has_contact_form": False,
+        "has_phone_link": False,
+        "has_cta": False,
+        "has_email_link": False,
+        "http_status": 200,
+    }
+    base = {o["service"]: o["score"] for o in map_to_service_opportunities(analysis)}
+    boosted = {
+        o["service"]: o["score"]
+        for o in map_to_service_opportunities(analysis, industry="Dental clinic")
+    }
+    for service in ("Appointment Automation", "AI Receptionist"):
+        if service in base and service in boosted:
+            assert boosted[service] >= base[service]

@@ -339,7 +339,9 @@ def run_research_job(job_id: str):
             business=cur.fetchone()
     try:
         analysis = analyze_website(business["website_url"])
-        service_opps = map_to_service_opportunities(analysis)
+        service_opps = map_to_service_opportunities(
+            analysis, industry=business.get("industry")
+        )
         all_factors = []
         for o in service_opps:
             for f in o["factors"]:
@@ -542,7 +544,9 @@ def analyze_business(business_id: str):
                 raise HTTPException(status_code=400, detail="Business has no website URL")
 
     analysis = analyze_website(business["website_url"])
-    service_opps = map_to_service_opportunities(analysis)
+    service_opps = map_to_service_opportunities(
+        analysis, industry=business.get("industry")
+    )
     all_factors = []
     for o in service_opps:
         for f in o["factors"]:
@@ -629,8 +633,8 @@ def analyze_business(business_id: str):
 def qualify(payload: dict):
     """
     Score an analysis. If service_name is provided, return a single service-weighted score.
-    If map_services=true (default when no service_name), return the full list of
-    service-specific opportunities.
+    Otherwise return the full list of service-specific opportunities (optionally
+    industry-biased via payload.industry).
     """
     analysis = payload.get("analysis")
     if not isinstance(analysis, dict):
@@ -638,9 +642,9 @@ def qualify(payload: dict):
     service_name = payload.get("service_name")
     if service_name:
         return score_opportunity(analysis, service_name)
-    # Default: full service-specific mapping
+    industry = payload.get("industry")
     return {
-        "opportunities": map_to_service_opportunities(analysis),
+        "opportunities": map_to_service_opportunities(analysis, industry=industry),
         "aggregate": score_opportunity(analysis),
     }
 

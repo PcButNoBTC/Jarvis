@@ -89,14 +89,21 @@ export default function Home() {
           {d.opportunities_queue.length === 0 ? <p style={{color:"#777"}}>No open opportunities yet.</p> :
             d.opportunities_queue.map((o) =>
               <div key={o.id} style={{padding:"14px 0",borderTop:"1px solid #eee"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:12}}>
-                  <strong>{o.business_name}</strong><span>Score {o.score ?? "—"}</span>
+                <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center"}}>
+                  <strong>{o.business_name}</strong>
+                  <span style={{fontSize:13,fontWeight:600}}>Score {o.score ?? "—"}</span>
                 </div>
-                <div style={{marginTop:4}}>{o.title}</div>
-                <div style={{fontSize:13,color:"#666",marginTop:5}}>
-                  {o.service_name || "Unassigned"} · {money(o.estimated_value_min)}–{money(o.estimated_value_max)}
+                <div style={{marginTop:6}}>{o.title}</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginTop:8}}>
+                  <span style={{
+                    fontSize:12,fontWeight:600,padding:"3px 8px",borderRadius:999,
+                    background:"#eef2ff",color:"#3730a3",border:"1px solid #c7d2fe"
+                  }}>{o.service_name || "Unassigned"}</span>
+                  <span style={{fontSize:13,color:"#666"}}>
+                    {money(o.estimated_value_min)}–{money(o.estimated_value_max)}
+                  </span>
                 </div>
-                <div style={{fontSize:13,marginTop:7}}>Next: {o.next_action || "Review"}</div>
+                <div style={{fontSize:13,marginTop:8,color:"#555"}}>Next: {o.next_action || "Review"}</div>
               </div>
             )}
         </div>

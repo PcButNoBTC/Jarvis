@@ -62,6 +62,47 @@ SERVICE_FACTOR_WEIGHTS: dict[str, dict[str, float]] = {
 # Minimum service score to emit as a real opportunity (0-100 scale)
 MIN_SERVICE_SCORE = 25
 
+# Industry keyword → service score multipliers (applied after factor weighting).
+# Keys are lowercase substrings matched against business.industry.
+INDUSTRY_BIAS: dict[str, dict[str, float]] = {
+    "dental": {"Appointment Automation": 1.35, "AI Receptionist": 1.3, "Review Automation": 1.25, "Lead Capture System": 1.1},
+    "dentist": {"Appointment Automation": 1.35, "AI Receptionist": 1.3, "Review Automation": 1.25, "Lead Capture System": 1.1},
+    "medical": {"Appointment Automation": 1.3, "AI Receptionist": 1.25, "Lead Capture System": 1.15},
+    "clinic": {"Appointment Automation": 1.3, "AI Receptionist": 1.25, "Lead Capture System": 1.15},
+    "law": {"Lead Capture System": 1.25, "AI Receptionist": 1.15, "AI Website": 1.1},
+    "attorney": {"Lead Capture System": 1.25, "AI Receptionist": 1.15, "AI Website": 1.1},
+    "legal": {"Lead Capture System": 1.25, "AI Receptionist": 1.15, "AI Website": 1.1},
+    "hvac": {"Lead Capture System": 1.3, "AI Receptionist": 1.2, "AI Website": 1.15, "Review Automation": 1.15},
+    "plumber": {"Lead Capture System": 1.3, "AI Receptionist": 1.2, "AI Website": 1.15, "Review Automation": 1.15},
+    "plumbing": {"Lead Capture System": 1.3, "AI Receptionist": 1.2, "AI Website": 1.15, "Review Automation": 1.15},
+    "electrician": {"Lead Capture System": 1.3, "AI Receptionist": 1.2, "AI Website": 1.15},
+    "contractor": {"Lead Capture System": 1.25, "AI Website": 1.2, "Review Automation": 1.15},
+    "roofing": {"Lead Capture System": 1.3, "AI Website": 1.2, "Review Automation": 1.2},
+    "restaurant": {"Review Automation": 1.35, "AI Website": 1.15, "Appointment Automation": 1.1},
+    "salon": {"Appointment Automation": 1.35, "Review Automation": 1.25, "AI Receptionist": 1.15},
+    "spa": {"Appointment Automation": 1.35, "Review Automation": 1.25, "AI Receptionist": 1.15},
+    "real estate": {"AI Website": 1.2, "Lead Capture System": 1.25, "Video Walkthrough": 1.4},
+    "realtor": {"AI Website": 1.2, "Lead Capture System": 1.25, "Video Walkthrough": 1.4},
+    "property": {"AI Website": 1.15, "Lead Capture System": 1.2, "Video Walkthrough": 1.3},
+    "auto": {"AI Receptionist": 1.2, "Appointment Automation": 1.2, "Review Automation": 1.2},
+    "veterinary": {"Appointment Automation": 1.3, "AI Receptionist": 1.25, "Review Automation": 1.2},
+    "vet": {"Appointment Automation": 1.3, "AI Receptionist": 1.25, "Review Automation": 1.2},
+}
+
+
+def _industry_multipliers(industry: str | None) -> dict[str, float]:
+    """Return service → multiplier map for a free-text industry string."""
+    if not industry:
+        return {}
+    text = industry.lower().strip()
+    merged: dict[str, float] = {}
+    for keyword, biases in INDUSTRY_BIAS.items():
+        if keyword in text:
+            for service, mult in biases.items():
+                # Keep the strongest multiplier if multiple keywords match
+                merged[service] = max(merged.get(service, 1.0), mult)
+    return merged
+
 
 def _collect_factors(analysis: dict) -> list[dict]:
     """Extract observed negative factors with points (evidence-first)."""
@@ -129,30 +170,46 @@ def score_opportunity(analysis: dict, service_name: str | None = None) -> dict:
     }
 
 
-def map_to_service_opportunities(analysis: dict) -> list[dict]:
+def map_to_service_opportunities(
+    analysis: dict, industry: str | None = None
+) -> list[dict]:
     """
     Turn raw website signals into service-specific opportunities.
+
+    Optional ``industry`` applies light multipliers so e.g. dental practices
+    surface Appointment / Receptionist opportunities more readily.
 
     Returns a list of dicts sorted by score descending:
       {
         "service": str,
         "score": int (0-100),
-        "factors": [ {factor, points}, ... ],  # only factors that contributed to this service
+        "factors": [ {factor, points}, ... ],
         "confidence": "heuristic",
         "title": str,
         "description": str,
+        "industry_bias": float | None,
       }
     Only services that reach MIN_SERVICE_SCORE are included.
-    If nothing reaches the threshold but there are factors, a single Custom Automation
-    opportunity is emitted so the pipeline still surfaces something for human review.
+    If nothing reaches the threshold but there are factors, a single Custom
+    Automation opportunity is emitted for human review.
     """
     factors = _collect_factors(analysis)
     if not factors:
         return []
 
+    industry_mult = _industry_multipliers(industry)
     results: list[dict] = []
 
-    for service, weights in SERVICE_FACTOR_WEIGHTS.items():
+    # Ensure Video Walkthrough can appear when industry strongly wants it
+    service_weights = dict(SERVICE_FACTOR_WEIGHTS)
+    if "Video Walkthrough" not in service_weights and industry_mult.get("Video Walkthrough", 1.0) > 1.0:
+        service_weights["Video Walkthrough"] = {
+            "no_clear_cta_observed": 0.5,
+            "no_contact_form_observed": 0.3,
+            "no_mobile_viewport_observed": 0.3,
+        }
+
+    for service, weights in service_weights.items():
         weighted = 0.0
         contributing: list[dict] = []
         for f in factors:
@@ -161,7 +218,8 @@ def map_to_service_opportunities(analysis: dict) -> list[dict]:
                 weighted += f["points"] * w
                 contributing.append(f)
 
-        score = min(int(round(weighted)), 100)
+        mult = industry_mult.get(service, 1.0)
+        score = min(int(round(weighted * mult)), 100)
         if score < MIN_SERVICE_SCORE:
             continue
 
@@ -174,12 +232,12 @@ def map_to_service_opportunities(analysis: dict) -> list[dict]:
                 "confidence": "heuristic",
                 "title": title,
                 "description": description,
+                "industry_bias": mult if mult != 1.0 else None,
             }
         )
 
     results.sort(key=lambda x: x["score"], reverse=True)
 
-    # Fallback: if every service scored below threshold, still surface Custom Automation
     if not results and factors:
         title, description = _service_copy("Custom Automation", factors)
         results.append(
@@ -190,6 +248,7 @@ def map_to_service_opportunities(analysis: dict) -> list[dict]:
                 "confidence": "heuristic",
                 "title": title,
                 "description": description,
+                "industry_bias": None,
             }
         )
 

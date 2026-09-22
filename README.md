@@ -123,3 +123,12 @@ Research jobs and `POST /businesses/{id}/analyze` now create **one opportunity p
 `POST /qualify` without `service_name` returns the full list of service-specific opportunities plus an aggregate score. With `service_name` it remains a single weighted score for backward compatibility.
 
 Prompt version for automated research is now `website-analysis-v2`.
+
+
+## V1.5 Industry bias + service-aware sales
+
+- Optional `industry` on a business boosts relevant services (e.g. dental → Appointment Automation + AI Receptionist; contractor → Lead Capture; restaurant → Review Automation).
+- Research and analyze paths pass `business.industry` into the mapper.
+- `POST /qualify` accepts `industry` when returning the full opportunity list.
+- Call-prep generators use service-specific openings and discovery questions.
+- Dashboard opportunity queue shows a clear service badge per opportunity.
