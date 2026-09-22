@@ -35,6 +35,17 @@ const card: React.CSSProperties = {
   boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
 };
 
+const smallButton: React.CSSProperties = {
+  padding: "7px 10px",
+  borderRadius: 8,
+  border: "1px solid #e2e8f0",
+  background: "#fff",
+  cursor: "pointer",
+  fontWeight: 600,
+  fontSize: 12,
+  color: "#334155",
+};
+
 const badge: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
@@ -69,6 +80,29 @@ export default function Home() {
         body: JSON.stringify({ status }),
       });
       await load();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runJsonAction(label: string, path: string, body: unknown) {
+    setBusy(path);
+    setActionMsg(null);
+    try {
+      const res = await fetch(API + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setActionMsg(err.detail || "Something went wrong. Try again.");
+        return;
+      }
+      setActionMsg(label + " complete — refresh to see the delivery state.");
+      await load();
+    } catch {
+      setActionMsg("Could not reach the API. Is it running?");
     } finally {
       setBusy(null);
     }
@@ -366,6 +400,26 @@ export default function Home() {
                     {p.validated_at && <span style={badge}>QA passed</span>}
                     {p.approved_at && <span style={badge}>Approved</span>}
                     {p.handoff_status && <span style={badge}>Handoff: {p.handoff_status}</span>}
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                    {(!p.implementation_status || p.implementation_status === "requirements" || p.implementation_status === "changes_requested" || p.implementation_status === "failed") && (
+                      <button onClick={() => runAction("Implementation", "/projects/" + p.id + "/generate")} style={smallButton}>Generate</button>
+                    )}
+                    {p.implementation_status === "generated" && (
+                      <button onClick={() => runAction("QA", "/projects/" + p.id + "/validate")} style={smallButton}>Run QA</button>
+                    )}
+                    {p.implementation_status === "validated" && (
+                      <button onClick={() => runJsonAction("Approval", "/projects/" + p.id + "/approval", { approved: true })} style={smallButton}>Approve</button>
+                    )}
+                    {p.implementation_status === "approved" && (
+                      <button onClick={() => runAction("Deployment", "/projects/" + p.id + "/deploy")} style={smallButton}>Deploy</button>
+                    )}
+                    {(p.implementation_status === "approved" || p.implementation_status === "deployed") && (
+                      <button onClick={() => runAction("Handoff", "/projects/" + p.id + "/handoff")} style={smallButton}>Handoff</button>
+                    )}
+                    {p.implementation_status === "deployed" && (
+                      <button onClick={() => runAction("Production check", "/projects/" + p.id + "/monitor")} style={smallButton}>Check live</button>
+                    )}
                   </div>
                 </div>
               ))
