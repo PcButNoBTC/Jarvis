@@ -56,7 +56,7 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Workflow run persistence
 - [x] Deterministic step advancement
 - [x] Human approval boundary for consequential actions
-- [x] Scheduled trigger records (worker execution still needs cron engine)
+- [x] Scheduled triggers with five-field cron parsing and atomic worker claims
 - [x] Research retry/backoff policy
 - [ ] Event-driven orchestration
 
@@ -76,8 +76,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Optional self-hosted API key
 - [x] Scoped client portal tokens
 - [x] Audit-log data model
-- [ ] User authentication (deployment API key is still the MVP guard)
-- [ ] Roles/permissions
+- [x] User authentication
+- [x] Roles/permissions
 - [x] Secret-reference abstraction (external secret manager still required)
 - [ ] Security event logging
 - [ ] Rate limiting
@@ -88,7 +88,7 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Requirements submission via project configuration API
 - [x] Client approval
 - [x] Revision requests
-- [ ] Deliverable downloads
+- [x] Deliverable downloads
 - [ ] Client messaging
 
 ## Phase 10 — Agent layer
@@ -100,8 +100,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Build agent registry/governance
 - [x] QA agent registry/governance
 - [x] Launch agent registry/governance
-- [ ] Per-agent budgets and permissions
-- [ ] Agent evaluation
+- [x] Per-agent budgets and tool/approval policy records
+- [x] Agent evaluation
 
 ## Definition of Strong MVP
 
