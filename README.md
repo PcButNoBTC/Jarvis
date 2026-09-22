@@ -1,10 +1,10 @@
-# Jarvis
+# Luma
 
 Self-hosted AI business operating system for finding opportunities, preparing sales, winning work, and helping deliver it.
 
 ## V1
 
-Jarvis V1 is built around a simple loop:
+Luma V1 is built around a simple loop:
 
 **Discover → Research → Qualify → Sell → Deliver → Follow up → Measure revenue**
 
@@ -84,3 +84,7 @@ Delivery workflow:
 The proposal and call-prep generators are deterministic templates for now. This keeps the core business loop usable without requiring a paid AI provider; stronger model-based generation can be added behind the provider-neutral AI layer later.
 
 Outbound communication is still not automatically sent. Human approval remains the gate before external communication.
+
+## Naming
+
+The AI operator is named **Luma**. The GitHub repository remains **Jarvis** for continuity with the existing project infrastructure.
