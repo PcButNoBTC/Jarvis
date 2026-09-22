@@ -231,6 +231,7 @@ Ranges are defaults in `database/schema.sql` and can be overridden per offer.
 | **V1.6** | Revenue outreach sequences + offer scopes |
 | **V1.7** | Client brief, warmer copy, client-friendly dashboard |
 | **V1.8** | Project icon, full capabilities README, branding polish |
+| **V2.0** | Delivery generation, QA, approval, deployment, monitoring, handoff |
 
 ---
 
