@@ -287,3 +287,14 @@ CREATE TABLE IF NOT EXISTS handoffs (
 
 CREATE INDEX IF NOT EXISTS idx_implementations_status ON implementations(status);
 CREATE INDEX IF NOT EXISTS idx_deployment_runs_project ON deployment_runs(project_id, created_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS launch_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  settings JSONB NOT NULL DEFAULT '{}',
+  ready BOOLEAN NOT NULL DEFAULT false,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_launch_settings_ready ON launch_settings(ready);
