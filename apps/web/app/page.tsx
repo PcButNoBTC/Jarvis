@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import LaunchCenter from "./launch-center";
 import ProjectConfiguration from "./project-configuration";
 import RevenueAnalytics from "./revenue-analytics";
+import IntegrationCenter from "./integration-center";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -500,6 +501,8 @@ export default function Home() {
       </section>
 
       <ProjectConfiguration projects={d.active_projects} />
+
+      <IntegrationCenter projects={d.active_projects} />
 
       <RevenueAnalytics />
 
