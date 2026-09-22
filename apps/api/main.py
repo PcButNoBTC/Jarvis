@@ -50,6 +50,12 @@ class ProspectCSVImport(BaseModel):
     source_url: str | None = None
 
 
+class OutreachDraftUpdate(BaseModel):
+    subject: str | None = None
+    body: str | None = None
+    status: str | None = None
+
+
 @app.get("/")
 def root():
     return {"name": "Luma", "version": "0.2.0", "status": "running"}
@@ -309,6 +315,10 @@ def list_research_jobs(status: str="pending", limit: int=20):
     limit=max(1,min(limit,100))
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("""UPDATE research_jobs
+                           SET status='pending', locked_at=NULL, updated_at=now()
+                           WHERE status='running'
+                             AND locked_at < now() - interval '15 minutes'""")
             cur.execute("""SELECT r.*,b.name AS business_name,b.website_url
                            FROM research_jobs r JOIN businesses b ON b.id=r.business_id
                            WHERE r.status=%s ORDER BY r.priority DESC,r.scheduled_at,r.created_at LIMIT %s""",
@@ -396,6 +406,44 @@ def create_outreach_draft(opportunity_id: str):
             cur.execute("""UPDATE opportunities SET next_action='Human review of outreach draft',updated_at=now()
                            WHERE id=%s""",(opportunity_id,))
             return cur.fetchone()
+
+
+@app.patch("/outreach/drafts/{message_id}")
+def update_outreach_draft(message_id: str, payload: OutreachDraftUpdate):
+    allowed = {"draft", "approved", "rejected"}
+    if payload.status is not None and payload.status not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid outreach draft status")
+    if payload.subject is not None and not payload.subject.strip():
+        raise HTTPException(status_code=400, detail="Subject cannot be empty")
+    if payload.body is not None and not payload.body.strip():
+        raise HTTPException(status_code=400, detail="Body cannot be empty")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE messages
+                   SET subject=COALESCE(%s,subject),
+                       body=COALESCE(%s,body),
+                       status=COALESCE(%s,status)
+                   WHERE id=%s AND direction='outbound'
+                   RETURNING *""",
+                (payload.subject, payload.body, payload.status, message_id),
+            )
+            message = cur.fetchone()
+            if not message:
+                raise HTTPException(status_code=404, detail="Outreach draft not found")
+            cur.execute(
+                """INSERT INTO activities
+                   (business_id, opportunity_id, type, subject, content, metadata)
+                   SELECT business_id, opportunity_id, 'outreach_review', %s, %s, %s::jsonb
+                   FROM messages WHERE id=%s""",
+                (
+                    "Outreach draft reviewed",
+                    "Draft was edited or its approval status changed.",
+                    json.dumps({"message_id": str(message_id), "status": message["status"]}),
+                    message_id,
+                ),
+            )
+            return message
 
 
 @app.get("/outreach/drafts")
