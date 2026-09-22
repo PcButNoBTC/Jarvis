@@ -65,12 +65,22 @@ Optional **industry bias** (dental, HVAC, contractor, restaurant, legal, …) ge
 - **Offers and proposals** — concrete deliverables, assumptions, exclusions per service
 - Proposal status: draft → sent → accepted / rejected / expired
 
-### 5. Delivery
-- Accepting a proposal can activate client + project + checklist
-- Projects, tasks, activities
-- Dashboard for pipeline value, won revenue, queues
+### 5. Delivery engine
+- Accepting a proposal creates a client, project, implementation record, and delivery checklist
+- Capture approved requirements per project
+- Generate real delivery artifacts from service blueprints
+- Validate generated artifacts against acceptance criteria
+- Human approval gate before deployment
+- Package a ZIP handoff the client can host or launch
+- Optional static-site deployment when LUMA_DEPLOY_ROOT is configured
+- Track implementation, deployment, artifacts, and handoff state in PostgreSQL
+- Projects, tasks, activities and dashboard queues
 
-### 6. Operating principles (product constraints)
+### 6. Delivery reality
+
+Luma now crosses the line from project tracking into implementation. The V1 delivery engine can generate a deployable static website package for AI Website projects and implementation/activation packages for workflow services. It does not fabricate third-party credentials, DNS ownership, calendar accounts, phone numbers, or provider access. Production deployment of a static site requires a configured `LUMA_DEPLOY_ROOT` and web-server/domain mapping on the host. Workflow services still require their provider-specific activation step.
+
+### 7. Operating principles (product constraints)
 - Start free/cheap; spend only when tied to revenue or quality
 - Never commit secrets to Git
 - **No auto-send** of outreach
@@ -165,6 +175,14 @@ docker compose up --build
 | `GET` | `/dashboard` | Counts + queues |
 | `GET` | `/projects/{id}` | Project detail |
 | `POST` | `/projects/{id}/start` | Start delivery |
+| `POST` | `/projects/{id}/requirements` | Save approved implementation requirements |
+| `POST` | `/projects/{id}/generate` | Generate implementation artifacts |
+| `POST` | `/projects/{id}/validate` | Run delivery QA |
+| `POST` | `/projects/{id}/approval` | Approve implementation for deployment |
+| `POST` | `/projects/{id}/deploy` | Deploy an approved static site when configured |
+| `GET` | `/projects/{id}/artifacts` | List generated artifacts |
+| `GET` | `/projects/{id}/download` | Download client delivery package |
+| `POST` | `/projects/{id}/handoff` | Prepare client handoff |
 | `PATCH` | `/tasks/{id}/status` | Update task |
 
 ---
