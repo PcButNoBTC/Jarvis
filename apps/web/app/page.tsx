@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import LaunchCenter from "./launch-center";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -471,6 +472,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <LaunchCenter projects={d.active_projects} />
 
       <section style={{ ...card, marginTop: 16 }}>
         <h2 style={{ marginTop: 0, fontSize: 18 }}>Open tasks</h2>
