@@ -49,6 +49,14 @@ def ensure_delivery_schema():
       error TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    CREATE TABLE IF NOT EXISTS launch_settings (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_id UUID UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      settings JSONB NOT NULL DEFAULT '{}',
+      ready BOOLEAN NOT NULL DEFAULT false,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_launch_settings_ready ON launch_settings(ready);
     CREATE TABLE IF NOT EXISTS handoffs (
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       project_id UUID UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
