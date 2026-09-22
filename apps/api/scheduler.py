@@ -9,4 +9,4 @@ from datetime import datetime, timezone
 
 def due_schedules(rows, now=None):
     now = now or datetime.now(timezone.utc)
-    return [row for row in rows if row.get("enabled") and (row.get("next_run_at") is None or row["next_run_at"] <= now)]
+    return [row for row in rows if row.get("enabled") and row.get("next_run_at") and row["next_run_at"] <= now]
