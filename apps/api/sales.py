@@ -180,3 +180,300 @@ def build_proposal_content(business_name: str, offer: dict, opportunity: dict) -
         "Confirm scope, requirements, pricing, and acceptance criteria before work begins.",
     ]
     return "\n".join(lines)
+
+
+# --- Revenue-focused outreach (evidence → reply → meeting) ---
+
+FACTOR_PLAIN = {
+    "site_error": "the site returned an error when we loaded it",
+    "no_https_observed": "the site was not served over HTTPS",
+    "no_mobile_viewport_observed": "the homepage is missing a mobile viewport tag",
+    "no_contact_form_observed": "there was no clear contact or quote form on the site",
+    "no_phone_link_observed": "there was no click-to-call phone link",
+    "no_clear_cta_observed": "there was no clear call-to-action (book, quote, or contact)",
+    "no_email_or_contact_form_observed": "there was no email link or contact form",
+    "slow_response_observed": "the page took several seconds to respond",
+}
+
+SERVICE_OUTCOME = {
+    "AI Website": "a conversion-focused site that makes it easier for visitors to take action",
+    "Lead Capture System": "a simple lead intake and follow-up flow so inquiries do not sit unanswered",
+    "AI Receptionist": "coverage for inbound calls so fewer jobs are lost to voicemail or missed rings",
+    "Appointment Automation": "booking and reminder automation that reduces no-shows and back-and-forth",
+    "Review Automation": "a light post-job review request flow that builds proof over time",
+    "Video Walkthrough": "a short walkthrough video that builds trust before the first call",
+    "Custom Automation": "a scoped workflow tied to one measurable bottleneck",
+}
+
+INDUSTRY_HOOK = {
+    "dental": "new patient inquiries",
+    "dentist": "new patient inquiries",
+    "medical": "new patient or appointment requests",
+    "clinic": "new patient or appointment requests",
+    "hvac": "emergency and estimate calls",
+    "plumber": "service and estimate calls",
+    "plumbing": "service and estimate calls",
+    "electrician": "service and estimate calls",
+    "contractor": "project and estimate inquiries",
+    "roofing": "estimate and storm-lead calls",
+    "law": "intake calls and consultation requests",
+    "attorney": "intake calls and consultation requests",
+    "legal": "intake calls and consultation requests",
+    "restaurant": "reservations and reputation",
+    "salon": "bookings and rebooking",
+    "spa": "bookings and rebooking",
+    "real estate": "buyer and seller inquiries",
+    "realtor": "buyer and seller inquiries",
+    "auto": "service appointments and quotes",
+    "veterinary": "appointment and urgent-care calls",
+    "vet": "appointment and urgent-care calls",
+}
+
+
+def _plain_observations(evidence: list, limit: int = 2) -> list[str]:
+    lines = []
+    for item in evidence or []:
+        if not isinstance(item, dict):
+            continue
+        factor = item.get("factor")
+        plain = FACTOR_PLAIN.get(factor)
+        if plain and plain not in lines:
+            lines.append(plain)
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _industry_hook(industry: str | None) -> str:
+    if not industry:
+        return "leads and follow-up"
+    text = industry.lower()
+    for key, hook in INDUSTRY_HOOK.items():
+        if key in text:
+            return hook
+    return "leads and follow-up"
+
+
+def build_outreach_sequence(opportunity: dict) -> dict:
+    """
+    Build a 3-touch email sequence (Day 1 / 3 / 7) from opportunity evidence.
+    All drafts stay status=draft until a human approves — nothing auto-sends.
+    """
+    business = opportunity.get("business_name") or "your business"
+    service = opportunity.get("service_name") or "Custom Automation"
+    industry = opportunity.get("industry")
+    evidence = opportunity.get("problem_evidence") or []
+    observations = _plain_observations(evidence, limit=2)
+    outcome = SERVICE_OUTCOME.get(service, SERVICE_OUTCOME["Custom Automation"])
+    hook = _industry_hook(industry)
+
+    if observations:
+        obs_sentence = "I noticed " + (" and ".join(observations)) + "."
+    else:
+        obs_sentence = (
+            "I reviewed the site and saw a few areas that often affect "
+            + hook
+            + "."
+        )
+
+    # Day 1 — observation + soft ask (highest leverage)
+    day1_subject = f"Quick note on {business}'s site"
+    if service == "AI Receptionist":
+        day1_subject = f"Missed calls at {business}?"
+    elif service == "Lead Capture System":
+        day1_subject = f"{business} — lead intake on the site"
+    elif service == "Appointment Automation":
+        day1_subject = f"Booking friction at {business}"
+    elif service == "Review Automation":
+        day1_subject = f"Reviews for {business}"
+
+    day1_body = (
+        f"Hi,\n\n"
+        f"I reviewed {business}'s website. {obs_sentence}\n\n"
+        f"For similar {industry or 'local'} businesses, that often means fewer "
+        f"{hook} than the site could produce.\n\n"
+        f"I can share a short plan for {outcome} — specific to what I observed, "
+        f"no generic pitch. Open to a 10-minute look this week?\n\n"
+        f"Best,\nLuma"
+    )
+
+    # Day 3 — short bump
+    day3_subject = f"Re: {day1_subject}"
+    day3_body = (
+        f"Hi,\n\n"
+        f"Quick follow-up on my note about {business}. "
+        f"Happy to send a one-page outline of what I'd fix first — "
+        f"or we can skip if timing is bad.\n\n"
+        f"Best,\nLuma"
+    )
+
+    # Day 7 — value + close loop
+    day7_subject = f"One idea for {business}"
+    day7_body = (
+        f"Hi,\n\n"
+        f"Last note from me. Based on what I saw on the site, the highest-ROI "
+        f"first step is usually focused on {outcome}.\n\n"
+        f"If useful, reply with a good time and I'll walk through a scoped option "
+        f"with clear pricing. If not, no problem — I'll leave it there.\n\n"
+        f"Best,\nLuma"
+    )
+
+    return {
+        "service": service,
+        "observations": observations,
+        "touches": [
+            {"day": 1, "channel": "email", "subject": day1_subject, "body": day1_body},
+            {"day": 3, "channel": "email", "subject": day3_subject, "body": day3_body},
+            {"day": 7, "channel": "email", "subject": day7_subject, "body": day7_body},
+        ],
+    }
+
+
+def default_offer_scope(service_name: str, business_name: str) -> dict:
+    """Concrete deliverables that make proposals easier to accept."""
+    scopes = {
+        "AI Website": {
+            "name": f"AI Website — {business_name}",
+            "description": (
+                "Conversion-focused website improvements with clear lead paths "
+                "and mobile-ready layout."
+            ),
+            "deliverables": [
+                "Homepage and key landing page conversion review",
+                "Mobile + form/CTA implementation in agreed scope",
+                "Lead capture connected to agreed inbox or CRM",
+                "Handoff checklist and basic training",
+            ],
+            "assumptions": [
+                "Client provides brand assets, copy, and domain/hosting access.",
+                "Scope is limited to agreed pages and forms.",
+            ],
+            "exclusions": [
+                "Ongoing ad spend or third-party SaaS fees.",
+                "Custom software outside the agreed page/form work.",
+            ],
+        },
+        "Lead Capture System": {
+            "name": f"Lead Capture System — {business_name}",
+            "description": (
+                "Structured lead intake, routing, and first-response workflow "
+                "so inquiries are not lost."
+            ),
+            "deliverables": [
+                "Lead form or intake path on the site or landing page",
+                "Routing rules to email/CRM/SMS as agreed",
+                "Basic auto-acknowledgment to the lead",
+                "Handoff and owner training on the queue",
+            ],
+            "assumptions": [
+                "Client names who owns lead response and preferred tools.",
+                "Existing CRM/email access is provided when required.",
+            ],
+            "exclusions": [
+                "Paid ads or list buying.",
+                "Full CRM migration outside agreed fields.",
+            ],
+        },
+        "AI Receptionist": {
+            "name": f"AI Receptionist — {business_name}",
+            "description": (
+                "AI-assisted inbound call handling for after-hours and overflow "
+                "so fewer opportunities hit voicemail only."
+            ),
+            "deliverables": [
+                "Call flow design (greet, qualify, book or take message)",
+                "Integration with agreed calendar or notification channel",
+                "Test calls and script refinements",
+                "Go-live checklist and owner handoff",
+            ],
+            "assumptions": [
+                "Client provides phone number routing options and business hours rules.",
+                "Booking calendars or notification endpoints are available.",
+            ],
+            "exclusions": [
+                "Carrier fees and phone number purchase unless agreed.",
+                "Outbound cold-calling campaigns.",
+            ],
+        },
+        "Appointment Automation": {
+            "name": f"Appointment Automation — {business_name}",
+            "description": (
+                "Booking, confirmation, and reminder flow to cut no-shows "
+                "and scheduling back-and-forth."
+            ),
+            "deliverables": [
+                "Online booking path or improved CTA to book",
+                "Confirmation and reminder messages (email and/or SMS)",
+                "Calendar sync as agreed",
+                "Owner training on the booking queue",
+            ],
+            "assumptions": [
+                "Client provides calendar access and reminder preferences.",
+                "SMS provider credentials provided if SMS is in scope.",
+            ],
+            "exclusions": [
+                "SMS carrier fees unless included in the offer.",
+                "Multi-location complex routing beyond agreed scope.",
+            ],
+        },
+        "Review Automation": {
+            "name": f"Review Automation — {business_name}",
+            "description": (
+                "Post-job review request workflow to collect more consistent "
+                "public proof."
+            ),
+            "deliverables": [
+                "Trigger rules after completed jobs or visits",
+                "Review request message templates",
+                "Links to preferred review platforms",
+                "Simple reporting on request volume",
+            ],
+            "assumptions": [
+                "Client defines when a job is 'complete' and who is eligible.",
+            ],
+            "exclusions": [
+                "Buying or incentivizing fake reviews.",
+                "Reputation crisis management.",
+            ],
+        },
+        "Custom Automation": {
+            "name": f"Custom Automation — {business_name}",
+            "description": (
+                "Scoped automation tied to one measurable workflow bottleneck."
+            ),
+            "deliverables": [
+                "Discovery and written process map for the target workflow",
+                "Configured automation within agreed tools",
+                "Test run and acceptance checklist",
+                "Owner handoff",
+            ],
+            "assumptions": [
+                "Client provides access to the systems involved.",
+                "Scope remains limited to the agreed workflow.",
+            ],
+            "exclusions": [
+                "Open-ended development without a written scope.",
+                "Third-party license fees unless listed.",
+            ],
+        },
+    }
+    return scopes.get(
+        service_name,
+        {
+            "name": f"{service_name} — {business_name}",
+            "description": f"Scoped implementation of {service_name}.",
+            "deliverables": [
+                "Discovery and requirements confirmation",
+                "Configured implementation of the agreed scope",
+                "Basic testing and handoff",
+            ],
+            "assumptions": [
+                "Client provides required access, content, and approvals.",
+                "Scope remains within the agreed deliverables.",
+            ],
+            "exclusions": [
+                "Unscoped third-party licenses or usage fees.",
+                "Material scope changes after approval.",
+            ],
+        },
+    )

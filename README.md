@@ -132,3 +132,12 @@ Prompt version for automated research is now `website-analysis-v2`.
 - `POST /qualify` accepts `industry` when returning the full opportunity list.
 - Call-prep generators use service-specific openings and discovery questions.
 - Dashboard opportunity queue shows a clear service badge per opportunity.
+
+
+## V1.6 Revenue outreach + offer scope
+
+Upgrades aimed only at booking meetings and closing offers:
+
+- `POST /outreach/drafts` builds a **Day 1 / 3 / 7** email sequence from opportunity evidence (plain-English observations, service outcome, industry hook). All messages stay **draft** until human approval.
+- Service-specific default offer deliverables, assumptions, and exclusions so proposals are concrete and easier to accept.
+- No auto-send. Human gate remains the control point before any external message.

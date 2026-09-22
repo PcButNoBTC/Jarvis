@@ -441,26 +441,63 @@ def run_research_job(job_id: str):
 
 @app.post("/outreach/drafts")
 def create_outreach_draft(opportunity_id: str):
+    """
+    Create a full Day 1 / 3 / 7 email sequence as draft messages.
+    Nothing is sent until a human approves each draft.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""SELECT o.*,b.name AS business_name,b.email AS business_email
-                           FROM opportunities o JOIN businesses b ON b.id=o.business_id WHERE o.id=%s""",(opportunity_id,))
-            opportunity=cur.fetchone()
-            if not opportunity: raise HTTPException(status_code=404,detail="Opportunity not found")
-            if not opportunity["business_email"]: raise HTTPException(status_code=400,detail="Business has no email")
-            evidence=opportunity["problem_evidence"] or []
-            evidence_text=", ".join(item.get("factor","observed issue") for item in evidence[:3])
-            subject="A quick idea for "+opportunity["business_name"]
-            body=(f"Hi,\n\nI reviewed {opportunity['business_name']}'s website and noticed "
-                  f"{evidence_text or 'a few areas worth reviewing'}. "
-                  "I can share a short, specific improvement plan if useful.\n\nBest,\nLuma")
-            cur.execute("""INSERT INTO messages
-                (business_id,opportunity_id,channel,direction,subject,body,status)
-                VALUES (%s,%s,'email','outbound',%s,%s,'draft') RETURNING *""",
-                (opportunity["business_id"],opportunity_id,subject,body))
-            cur.execute("""UPDATE opportunities SET next_action='Human review of outreach draft',updated_at=now()
-                           WHERE id=%s""",(opportunity_id,))
-            return cur.fetchone()
+            cur.execute(
+                """SELECT o.*, b.name AS business_name, b.email AS business_email,
+                          b.industry, s.name AS service_name
+                   FROM opportunities o
+                   JOIN businesses b ON b.id = o.business_id
+                   LEFT JOIN services s ON s.id = o.service_id
+                   WHERE o.id = %s""",
+                (opportunity_id,),
+            )
+            opportunity = cur.fetchone()
+            if not opportunity:
+                raise HTTPException(status_code=404, detail="Opportunity not found")
+            if not opportunity["business_email"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Business has no email — add an email before drafting outreach",
+                )
+
+            sequence = build_outreach_sequence(opportunity)
+            created = []
+            for touch in sequence["touches"]:
+                meta_note = f"[Day {touch['day']}] "
+                cur.execute(
+                    """INSERT INTO messages
+                       (business_id, opportunity_id, channel, direction, subject, body, status)
+                       VALUES (%s, %s, %s, 'outbound', %s, %s, 'draft')
+                       RETURNING *""",
+                    (
+                        opportunity["business_id"],
+                        opportunity_id,
+                        touch["channel"],
+                        touch["subject"],
+                        meta_note + touch["body"],
+                    ),
+                )
+                created.append(cur.fetchone())
+
+            cur.execute(
+                """UPDATE opportunities
+                   SET next_action = 'Human review of outreach sequence (Day 1/3/7 drafts)',
+                       updated_at = now()
+                   WHERE id = %s""",
+                (opportunity_id,),
+            )
+            return {
+                "opportunity_id": opportunity_id,
+                "service": sequence["service"],
+                "observations": sequence["observations"],
+                "drafts": created,
+                "note": "All messages are drafts. Approve individually before any send.",
+            }
 
 
 @app.patch("/outreach/drafts/{message_id}")
@@ -649,7 +686,12 @@ def qualify(payload: dict):
     }
 
 
-from sales import build_call_prep, build_proposal_content
+from sales import (
+    build_call_prep,
+    build_proposal_content,
+    build_outreach_sequence,
+    default_offer_scope,
+)
 
 
 def _get_opportunity(cur, opportunity_id: str):
@@ -749,24 +791,16 @@ def create_offer(opportunity_id: str, payload: dict | None = None):
             if not service:
                 raise HTTPException(status_code=400, detail="Active service not found: " + service_name)
 
+            scope = default_offer_scope(service_name, opportunity["business_name"])
             setup_price = payload.get("setup_price")
             if setup_price is None:
                 setup_price = float(service["price_min"] or 0)
             recurring_price = payload.get("recurring_price")
-            name = payload.get("name") or "{} — {}".format(service["name"], opportunity["business_name"])
-            deliverables = [
-                "Discovery and requirements confirmation for " + service["name"],
-                "Configured implementation of the agreed scope",
-                "Basic testing and handoff",
-            ]
-            assumptions = [
-                "Client provides required access, content, and approvals.",
-                "Scope remains within the agreed deliverables.",
-            ]
-            exclusions = [
-                "Unscoped third-party licenses or usage fees.",
-                "Material scope changes after approval.",
-            ]
+            name = payload.get("name") or scope["name"]
+            deliverables = payload.get("deliverables") or scope["deliverables"]
+            assumptions = payload.get("assumptions") or scope["assumptions"]
+            exclusions = payload.get("exclusions") or scope["exclusions"]
+            description = payload.get("description") or scope["description"] or service["description"]
             cur.execute(
                 """INSERT INTO offers
                    (opportunity_id, service_id, name, description, setup_price,
@@ -774,9 +808,15 @@ def create_offer(opportunity_id: str, payload: dict | None = None):
                    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
                    RETURNING *""",
                 (
-                    opportunity_id, service["id"], name, service["description"],
-                    setup_price, recurring_price, json.dumps(deliverables),
-                    json.dumps(assumptions), json.dumps(exclusions),
+                    opportunity_id,
+                    service["id"],
+                    name,
+                    description,
+                    setup_price,
+                    recurring_price,
+                    json.dumps(deliverables),
+                    json.dumps(assumptions),
+                    json.dumps(exclusions),
                 ),
             )
             offer = cur.fetchone()
