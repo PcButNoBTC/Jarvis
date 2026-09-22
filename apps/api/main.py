@@ -13,7 +13,7 @@ from db import get_conn, ensure_delivery_schema
 from qualification import score_opportunity, map_to_service_opportunities
 from website_analyzer import analyze_website
 from delivery import generate_project, validate_project, package_project, deploy_static, check_live_url
-from project_options import option_definitions, validate_options, option_summary
+from project_options import option_definitions, validate_options, option_summary, compile_requirements
 from requirements import compile_requirements
 from revenue import revenue_summary, service_performance
 from workflows import workflow_definition, next_step
