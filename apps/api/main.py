@@ -21,6 +21,7 @@ from integrations import providers, suggestions_for_service, provider_setup
 from security import authenticate, can, PUBLIC_PATHS
 from portal import create_token, hash_token
 from auth import hash_password, verify_password, issue_token
+from scheduler import next_run
 
 app = FastAPI(title="Luma API", version="0.7.0")
 
@@ -2381,11 +2382,15 @@ def create_automation_schedule(payload: dict):
         raise HTTPException(status_code=400, detail=str(exc))
     with get_conn() as conn:
         with conn.cursor() as cur:
+            expression=payload["cron_expression"]
+            try:
+                scheduled_for=payload.get("next_run_at") or next_run(expression)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
             cur.execute(
                 """INSERT INTO automation_schedules (workflow_name, cron_expression, input, next_run_at)
                    VALUES (%s,%s,%s::jsonb,%s) RETURNING *""",
-                (payload["workflow_name"], payload["cron_expression"], json.dumps(payload.get("input") or {}),
-                 payload.get("next_run_at")),
+                (payload["workflow_name"], expression, json.dumps(payload.get("input") or {}), scheduled_for),
             )
             return cur.fetchone()
 
@@ -2519,3 +2524,29 @@ def create_user(payload: dict, request: Request):
 @app.get("/auth/me")
 def auth_me(request: Request):
     return request.state.principal
+
+
+@app.post("/automation/schedules/claim")
+def claim_due_schedule():
+    from datetime import datetime, timezone
+    now=datetime.now(timezone.utc)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT * FROM automation_schedules
+                   WHERE enabled=true AND next_run_at IS NOT NULL AND next_run_at <= now()
+                   ORDER BY next_run_at LIMIT 1 FOR UPDATE SKIP LOCKED"""
+            )
+            row=cur.fetchone()
+            if not row:
+                return {"claimed":False}
+            try:
+                following=next_run(row["cron_expression"], now)
+            except ValueError as exc:
+                cur.execute("UPDATE automation_schedules SET enabled=false WHERE id=%s",(row["id"],))
+                raise HTTPException(status_code=400, detail=str(exc))
+            cur.execute(
+                """UPDATE automation_schedules SET last_run_at=%s,next_run_at=%s
+                   WHERE id=%s RETURNING *""",(now,following,row["id"])
+            )
+            return {"claimed":True,"schedule":cur.fetchone()}
