@@ -1,5 +1,7 @@
 import os
 import json
+import csv
+import io
 from datetime import date
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
@@ -40,6 +42,12 @@ class ProspectIngest(BaseModel):
 
 class ResearchEnqueue(BaseModel):
     priority: int = 50
+
+
+class ProspectCSVImport(BaseModel):
+    csv_text: str
+    source: str = "csv"
+    source_url: str | None = None
 
 
 @app.get("/")
@@ -220,6 +228,39 @@ def ingest_prospect(payload: ProspectIngest):
 
 
 
+
+
+
+
+
+@app.post("/prospects/import-csv")
+def import_prospects_csv(payload: ProspectCSVImport):
+    if len(payload.csv_text.encode("utf-8")) > 2_000_000:
+        raise HTTPException(status_code=400, detail="CSV payload is too large")
+    reader = csv.DictReader(io.StringIO(payload.csv_text))
+    required = {"name"}
+    headers = {h.strip().lower() for h in (reader.fieldnames or []) if h}
+    if not required.issubset(headers):
+        raise HTTPException(status_code=400, detail="CSV must include a name column")
+    rows = []
+    for row in reader:
+        normalized = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        if not normalized.get("name"):
+            continue
+        rows.append(ProspectIngest(
+            name=normalized["name"],
+            website_url=normalized.get("website_url") or normalized.get("website"),
+            industry=normalized.get("industry"),
+            phone=normalized.get("phone"),
+            email=normalized.get("email"),
+            source=payload.source,
+            source_url=payload.source_url,
+            source_external_id=normalized.get("source_external_id") or normalized.get("id"),
+            notes=normalized.get("notes"),
+        ))
+        if len(rows) > 100:
+            raise HTTPException(status_code=400, detail="Maximum batch size is 100")
+    return ingest_prospects_batch(rows)
 
 
 @app.post("/prospects/ingest-batch")
