@@ -762,8 +762,8 @@ def run_research_job(job_id: str):
                     cur.execute(
                         """INSERT INTO opportunities
                            (business_id,research_report_id,title,description,problem_evidence,score,
-                            estimated_value_min,estimated_value_max,status,next_action,service_id)
-                           SELECT %s,%s,%s,%s,%s::jsonb,%s,price_min,price_max,
+                            confidence,rationale,factors,estimated_value_min,estimated_value_max,status,next_action,service_id)
+                           SELECT %s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,price_min,price_max,
                                   'new','Review evidence and approve outreach',id
                            FROM services WHERE name=%s RETURNING id""",
                         (
@@ -773,12 +773,28 @@ def run_research_job(job_id: str):
                             o["description"],
                             json.dumps(o["factors"]),
                             o["score"],
+                            o.get("confidence"),
+                            o["description"],
+                            json.dumps(o["factors"]),
                             o["service"],
                         ),
                     )
                     row = cur.fetchone()
                     if row:
                         opportunity_ids.append(row["id"])
+                        for factor in o["factors"]:
+                            cur.execute(
+                                """INSERT INTO evidence_items
+                                   (business_id,research_report_id,opportunity_id,evidence_type,observation,
+                                    source_url,confidence,metadata)
+                                   VALUES (%s,%s,%s,'website_observation',%s,%s,%s,%s::jsonb)""",
+                                (
+                                    business["id"], report_id, row["id"],
+                                    factor.get("factor", "observed signal"), analysis.get("url"),
+                                    o.get("confidence"),
+                                    json.dumps({"points": factor.get("points", 0), "source": "website_analyzer"}),
+                                ),
+                            )
 
                 cur.execute(
                     """UPDATE research_jobs SET status='completed',completed_at=now(),
