@@ -22,6 +22,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://jarvis:change-me@db:5432/jarvis}
       LUMA_DELIVERY_ROOT: /data/delivery
       LUMA_DEPLOY_ROOT: /data/deploy
+      LUMA_API_KEY: ${LUMA_API_KEY:-}
     volumes:
       - ./data:/data
     ports:
@@ -34,6 +35,7 @@ services:
     build: ./apps/worker
     environment:
       API_URL: http://api:8000
+      LUMA_API_KEY: ${LUMA_API_KEY:-}
     depends_on:
       db:
         condition: service_healthy
