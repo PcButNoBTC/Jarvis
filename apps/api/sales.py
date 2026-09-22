@@ -289,11 +289,13 @@ def build_outreach_sequence(opportunity: dict) -> dict:
 
     day1_body = (
         f"Hi,\n\n"
-        f"I reviewed {business}'s website. {obs_sentence}\n\n"
-        f"For similar {industry or 'local'} businesses, that often means fewer "
-        f"{hook} than the site could produce.\n\n"
-        f"I can share a short plan for {outcome} — specific to what I observed, "
-        f"no generic pitch. Open to a 10-minute look this week?\n\n"
+        f"I took a quick look at {business}'s website — not a sales scrape, "
+        f"just the public pages. {obs_sentence}\n\n"
+        f"For many {industry or 'local'} teams, that kind of gap can quietly cost "
+        f"{hook}. I am not assuming it is a problem for you; I only wanted to "
+        f"share what I saw.\n\n"
+        f"If helpful, I can send a one-page note on {outcome}, written in plain "
+        f"language, with a clear price range. No long deck. Would that be useful?\n\n"
         f"Best,\nLuma"
     )
 
@@ -301,9 +303,9 @@ def build_outreach_sequence(opportunity: dict) -> dict:
     day3_subject = f"Re: {day1_subject}"
     day3_body = (
         f"Hi,\n\n"
-        f"Quick follow-up on my note about {business}. "
-        f"Happy to send a one-page outline of what I'd fix first — "
-        f"or we can skip if timing is bad.\n\n"
+        f"Just checking in on my note about {business}. "
+        f"If the timing is wrong, no need to reply — I will not keep chasing. "
+        f"If a short one-pager would help, say the word and I will send it.\n\n"
         f"Best,\nLuma"
     )
 
@@ -311,10 +313,11 @@ def build_outreach_sequence(opportunity: dict) -> dict:
     day7_subject = f"One idea for {business}"
     day7_body = (
         f"Hi,\n\n"
-        f"Last note from me. Based on what I saw on the site, the highest-ROI "
-        f"first step is usually focused on {outcome}.\n\n"
-        f"If useful, reply with a good time and I'll walk through a scoped option "
-        f"with clear pricing. If not, no problem — I'll leave it there.\n\n"
+        f"Last note from me so your inbox stays clear. "
+        f"The simplest first step, based only on what I observed, is usually "
+        f"{outcome}.\n\n"
+        f"Happy to jump on a 10-minute call or send the one-pager. "
+        f"If it is not relevant, feel free to ignore this — no hard feelings.\n\n"
         f"Best,\nLuma"
     )
 
@@ -477,3 +480,99 @@ def default_offer_scope(service_name: str, business_name: str) -> dict:
             ],
         },
     )
+
+
+def build_client_brief(opportunity: dict) -> dict:
+    """
+    One-page, client-friendly brief: what we noticed, why it matters,
+    a simple recommended next step, and clear pricing range.
+    Designed to be shared with the prospect — not internal jargon.
+    """
+    business = opportunity.get("business_name") or "your business"
+    service = opportunity.get("service_name") or "Custom Automation"
+    industry = opportunity.get("industry")
+    evidence = opportunity.get("problem_evidence") or []
+    observations = _plain_observations(evidence, limit=3)
+    outcome = SERVICE_OUTCOME.get(service, SERVICE_OUTCOME["Custom Automation"])
+    hook = _industry_hook(industry)
+
+    price_min = opportunity.get("price_min") or opportunity.get("estimated_value_min")
+    price_max = opportunity.get("price_max") or opportunity.get("estimated_value_max")
+    if price_min is not None and price_max is not None:
+        investment = f"${float(price_min):,.0f}–${float(price_max):,.0f} setup (typical range for this scope)"
+    elif price_min is not None:
+        investment = f"From ${float(price_min):,.0f} setup"
+    else:
+        investment = "Scoped after a short discovery call"
+
+    if observations:
+        noticed = [f"We noticed {o}." for o in observations]
+    else:
+        noticed = [
+            f"We reviewed the public site for {business} and found a few areas "
+            f"that often affect {hook}."
+        ]
+
+    why_it_matters = (
+        f"For {industry or 'local'} businesses, gaps like these usually mean "
+        f"fewer {hook} than the site and phones could produce — not because "
+        f"the team is not working hard, but because the path for a customer "
+        f"to reach you is unclear or incomplete."
+    )
+
+    recommendation = (
+        f"A focused project for **{service}**: {outcome}. "
+        f"We keep scope tight, show you the plan before work starts, "
+        f"and only recommend what matches what we actually observed."
+    )
+
+    how_we_work = [
+        "We only recommend based on what we can observe — no generic AI pitch.",
+        "You approve every external message and every scope before work begins.",
+        "One clear deliverable list, one price range, one owner on our side.",
+        "If it is not a fit after discovery, we say so and stop.",
+    ]
+
+    next_step = (
+        "A 10–15 minute call to confirm whether this is a real problem for you, "
+        "what success would look like, and whether a scoped proposal makes sense. "
+        "No long deck. No pressure."
+    )
+
+    markdown = "\n".join(
+        [
+            f"# A short look at {business}",
+            "",
+            "## What we noticed",
+            *[f"- {line}" for line in noticed],
+            "",
+            "## Why it can matter",
+            why_it_matters,
+            "",
+            "## A simple recommendation",
+            recommendation,
+            "",
+            f"**Typical investment:** {investment}",
+            "",
+            "## How we work with clients",
+            *[f"- {line}" for line in how_we_work],
+            "",
+            "## Suggested next step",
+            next_step,
+            "",
+            "— Luma",
+        ]
+    )
+
+    return {
+        "business_name": business,
+        "service": service,
+        "title": f"A short look at {business}",
+        "noticed": noticed,
+        "why_it_matters": why_it_matters,
+        "recommendation": recommendation,
+        "investment": investment,
+        "how_we_work": how_we_work,
+        "next_step": next_step,
+        "markdown": markdown,
+    }

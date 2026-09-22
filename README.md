@@ -141,3 +141,13 @@ Upgrades aimed only at booking meetings and closing offers:
 - `POST /outreach/drafts` builds a **Day 1 / 3 / 7** email sequence from opportunity evidence (plain-English observations, service outcome, industry hook). All messages stay **draft** until human approval.
 - Service-specific default offer deliverables, assumptions, and exclusions so proposals are concrete and easier to accept.
 - No auto-send. Human gate remains the control point before any external message.
+
+
+## V1.7 Client-friendly experience
+
+Positioning and product changes so prospects *want* to work with you:
+
+- **Client brief** — `POST /opportunities/{id}/client-brief` produces a one-page, plain-English summary (what we noticed, why it matters, recommendation, price range, how we work). Shareable with the prospect.
+- **Warmer outreach** — Day 1/3/7 copy is collaborative, low-pressure, and explicit about not chasing.
+- **Dashboard** — Clear headline (“Only recommend what you observed”), one-click Client brief / Draft outreach / Call prep on each opportunity, human-approval callouts.
+- Nothing auto-sends. Clients see evidence and scope before they commit.

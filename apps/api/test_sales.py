@@ -3,6 +3,7 @@ from sales import (
     build_proposal_content,
     build_outreach_sequence,
     default_offer_scope,
+    build_client_brief,
 )
 
 
@@ -53,9 +54,10 @@ def test_outreach_sequence_uses_plain_evidence():
     )
     assert len(seq["touches"]) == 3
     assert seq["touches"][0]["day"] == 1
-    assert "contact or quote form" in seq["touches"][0]["body"]
-    assert "Acme Plumbing" in seq["touches"][0]["subject"] or "Acme Plumbing" in seq["touches"][0]["body"]
-    assert "service and estimate calls" in seq["touches"][0]["body"]
+    body = seq["touches"][0]["body"]
+    assert "contact or quote form" in body
+    assert "Acme Plumbing" in body
+    assert "one-page" in body.lower() or "one-pager" in body.lower() or "Would that be useful" in body
 
 
 def test_default_offer_scope_is_service_specific():
@@ -63,3 +65,21 @@ def test_default_offer_scope_is_service_specific():
     assert "City Dental" in scope["name"]
     assert any("call" in d.lower() or "Call" in d for d in scope["deliverables"])
     assert scope["exclusions"]
+
+
+def test_client_brief_is_plain_and_shareable():
+    brief = build_client_brief(
+        {
+            "business_name": "Riverside Dental",
+            "service_name": "Appointment Automation",
+            "industry": "dental",
+            "problem_evidence": [{"factor": "no_clear_cta_observed", "points": 10}],
+            "price_min": 500,
+            "price_max": 2000,
+        }
+    )
+    assert "Riverside Dental" in brief["title"]
+    assert brief["markdown"].startswith("#")
+    assert "How we work" in brief["markdown"] or "how we work" in brief["markdown"].lower()
+    assert "500" in brief["investment"] or "From" in brief["investment"]
+    assert "no long deck" in brief["next_step"].lower() or "10" in brief["next_step"]

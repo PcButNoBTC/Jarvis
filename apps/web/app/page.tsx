@@ -20,28 +20,53 @@ type Dashboard = {
   outreach_drafts: any[];
 };
 
-const money = (value: number) => new Intl.NumberFormat("en-US", {
-  style: "currency", currency: "USD", maximumFractionDigits: 0
-}).format(value || 0);
+const money = (value: number) =>
+  new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value || 0);
+
+const card: React.CSSProperties = {
+  border: "1px solid #e8e8ec",
+  borderRadius: 16,
+  padding: 20,
+  background: "#fff",
+  boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
+};
+
+const badge: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  padding: "4px 10px",
+  borderRadius: 999,
+  background: "#eef2ff",
+  color: "#3730a3",
+  border: "1px solid #c7d2fe",
+  display: "inline-block",
+};
 
 export default function Home() {
   const [data, setData] = useState<Dashboard | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [actionMsg, setActionMsg] = useState<string | null>(null);
 
   async function load() {
     const response = await fetch(API + "/dashboard");
     setData(await response.json());
   }
 
-  useEffect(() => { load().catch(() => setData(null)); }, []);
+  useEffect(() => {
+    load().catch(() => setData(null));
+  }, []);
 
   async function taskStatus(id: string, status: string) {
     setBusy(id);
     try {
       await fetch(API + "/tasks/" + id + "/status", {
         method: "PATCH",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({status})
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
       });
       await load();
     } finally {
@@ -49,121 +74,391 @@ export default function Home() {
     }
   }
 
+  async function runAction(label: string, path: string) {
+    setBusy(path);
+    setActionMsg(null);
+    try {
+      const res = await fetch(API + path, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setActionMsg(err.detail || "Something went wrong. Try again.");
+        return;
+      }
+      setActionMsg(label + " ready — refresh to see updates.");
+      await load();
+    } catch {
+      setActionMsg("Could not reach the API. Is it running?");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const d = data || {
-    businesses:0, opportunities:0, proposals:0, clients:0, projects:0,
-    open_tasks:0, pipeline_value:0, won_revenue:0,
-    opportunities_queue:[], active_projects:[], tasks:[], research_queue:[], outreach_drafts:[]
+    businesses: 0,
+    opportunities: 0,
+    proposals: 0,
+    clients: 0,
+    projects: 0,
+    open_tasks: 0,
+    pipeline_value: 0,
+    won_revenue: 0,
+    opportunities_queue: [],
+    active_projects: [],
+    tasks: [],
+    research_queue: [],
+    outreach_drafts: [],
   };
 
   return (
-    <main style={{padding:32,maxWidth:1200,margin:"0 auto",fontFamily:"system-ui"}}>
-      <header style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:16}}>
+    <main
+      style={{
+        padding: "28px 24px 48px",
+        maxWidth: 1120,
+        margin: "0 auto",
+        fontFamily:
+          'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+        color: "#0f172a",
+        background: "#f8fafc",
+        minHeight: "100vh",
+      }}
+    >
+      <header
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 16,
+          marginBottom: 8,
+        }}
+      >
         <div>
-          <h1 style={{marginBottom:4}}>Luma</h1>
-          <p style={{marginTop:0,color:"#666"}}>Business operating system: discover → research → qualify → sell → deliver → measure.</p>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "#6366f1",
+              marginBottom: 6,
+            }}
+          >
+            Luma
+          </div>
+          <h1 style={{ margin: "0 0 8px", fontSize: 28, fontWeight: 700 }}>
+            Only recommend what you observed
+          </h1>
+          <p style={{ margin: 0, color: "#64748b", maxWidth: 560, lineHeight: 1.5 }}>
+            Research a site, turn signals into clear service opportunities, draft
+            respectful outreach, and share a one-page brief clients can understand.
+            Nothing sends without your approval.
+          </p>
         </div>
-        <button onClick={() => load()} style={{padding:"10px 14px",borderRadius:8,border:"1px solid #ccc",background:"#fff",cursor:"pointer"}}>Refresh</button>
+        <button
+          onClick={() => load()}
+          style={{
+            padding: "10px 16px",
+            borderRadius: 10,
+            border: "1px solid #e2e8f0",
+            background: "#fff",
+            cursor: "pointer",
+            fontWeight: 600,
+            color: "#334155",
+          }}
+        >
+          Refresh
+        </button>
       </header>
 
-      <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginTop:24}}>
+      {actionMsg && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: "12px 14px",
+            borderRadius: 10,
+            background: "#ecfdf5",
+            color: "#065f46",
+            border: "1px solid #a7f3d0",
+            fontSize: 14,
+          }}
+        >
+          {actionMsg}
+        </div>
+      )}
+
+      <section
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))",
+          gap: 12,
+          marginTop: 24,
+        }}
+      >
         {[
-          ["Potential pipeline", money(d.pipeline_value)],
-          ["Won revenue", money(d.won_revenue)],
+          ["Pipeline", money(d.pipeline_value)],
+          ["Won", money(d.won_revenue)],
           ["Opportunities", d.opportunities],
           ["Proposals", d.proposals],
           ["Clients", d.clients],
           ["Projects", d.projects],
           ["Open tasks", d.open_tasks],
           ["Prospects", d.businesses],
-        ].map(([label,value]) =>
-          <div key={String(label)} style={{border:"1px solid #ddd",borderRadius:12,padding:18}}>
-            <div style={{fontSize:12,textTransform:"uppercase",color:"#777"}}>{label}</div>
-            <div style={{fontSize:26,fontWeight:700,marginTop:6}}>{value}</div>
+        ].map(([label, value]) => (
+          <div key={String(label)} style={card}>
+            <div
+              style={{
+                fontSize: 12,
+                textTransform: "uppercase",
+                letterSpacing: "0.03em",
+                color: "#94a3b8",
+                fontWeight: 600,
+              }}
+            >
+              {label}
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 700, marginTop: 6 }}>{value}</div>
           </div>
-        )}
+        ))}
       </section>
 
-      <section style={{display:"grid",gridTemplateColumns:"minmax(0,1.35fr) minmax(0,1fr)",gap:20,marginTop:28}}>
-        <div style={{border:"1px solid #ddd",borderRadius:12,padding:20}}>
-          <h2 style={{marginTop:0}}>Opportunity queue</h2>
-          {d.opportunities_queue.length === 0 ? <p style={{color:"#777"}}>No open opportunities yet.</p> :
-            d.opportunities_queue.map((o) =>
-              <div key={o.id} style={{padding:"14px 0",borderTop:"1px solid #eee"}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center"}}>
-                  <strong>{o.business_name}</strong>
-                  <span style={{fontSize:13,fontWeight:600}}>Score {o.score ?? "—"}</span>
+      <section
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0,1.4fr) minmax(0,1fr)",
+          gap: 16,
+          marginTop: 24,
+        }}
+      >
+        <div style={card}>
+          <h2 style={{ marginTop: 0, fontSize: 18 }}>Opportunities to act on</h2>
+          <p style={{ marginTop: -6, color: "#64748b", fontSize: 14 }}>
+            Each row is a specific service tied to evidence — not a generic “AI” pitch.
+          </p>
+          {d.opportunities_queue.length === 0 ? (
+            <p style={{ color: "#94a3b8" }}>No open opportunities yet. Research a prospect to start.</p>
+          ) : (
+            d.opportunities_queue.map((o) => (
+              <div
+                key={o.id}
+                style={{
+                  padding: "16px 0",
+                  borderTop: "1px solid #f1f5f9",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    alignItems: "center",
+                  }}
+                >
+                  <strong style={{ fontSize: 15 }}>{o.business_name}</strong>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#475569" }}>
+                    Score {o.score ?? "—"}
+                  </span>
                 </div>
-                <div style={{marginTop:6}}>{o.title}</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",marginTop:8}}>
-                  <span style={{
-                    fontSize:12,fontWeight:600,padding:"3px 8px",borderRadius:999,
-                    background:"#eef2ff",color:"#3730a3",border:"1px solid #c7d2fe"
-                  }}>{o.service_name || "Unassigned"}</span>
-                  <span style={{fontSize:13,color:"#666"}}>
+                <div style={{ marginTop: 6, color: "#334155" }}>{o.title}</div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    alignItems: "center",
+                    marginTop: 10,
+                  }}
+                >
+                  <span style={badge}>{o.service_name || "Unassigned"}</span>
+                  <span style={{ fontSize: 13, color: "#64748b" }}>
                     {money(o.estimated_value_min)}–{money(o.estimated_value_max)}
                   </span>
                 </div>
-                <div style={{fontSize:13,marginTop:8,color:"#555"}}>Next: {o.next_action || "Review"}</div>
+                <div style={{ fontSize: 13, marginTop: 10, color: "#64748b" }}>
+                  Next: {o.next_action || "Review evidence"}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+                  <button
+                    disabled={busy === o.id + "-brief"}
+                    onClick={() =>
+                      runAction("Client brief", "/opportunities/" + o.id + "/client-brief")
+                    }
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#4f46e5",
+                      color: "#fff",
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Client brief
+                  </button>
+                  <button
+                    disabled={busy === o.id + "-outreach"}
+                    onClick={() =>
+                      runAction("Outreach sequence", "/outreach/drafts?opportunity_id=" + o.id)
+                    }
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #e2e8f0",
+                      background: "#fff",
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      color: "#334155",
+                    }}
+                  >
+                    Draft outreach
+                  </button>
+                  <button
+                    disabled={busy === o.id + "-call"}
+                    onClick={() =>
+                      runAction("Call prep", "/opportunities/" + o.id + "/prepare-call")
+                    }
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #e2e8f0",
+                      background: "#fff",
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      color: "#334155",
+                    }}
+                  >
+                    Call prep
+                  </button>
+                </div>
               </div>
-            )}
+            ))
+          )}
         </div>
 
-        <div style={{border:"1px solid #ddd",borderRadius:12,padding:20}}>
-          <h2 style={{marginTop:0}}>Active projects</h2>
-          {d.active_projects.length === 0 ? <p style={{color:"#777"}}>No active projects yet.</p> :
-            d.active_projects.map((p) =>
-              <div key={p.id} style={{padding:"14px 0",borderTop:"1px solid #eee"}}>
-                <strong>{p.business_name}</strong>
-                <div>{p.name}</div>
-                <div style={{fontSize:13,color:"#666"}}>{p.status} · {money(p.agreed_price)}</div>
-              </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={card}>
+            <h2 style={{ marginTop: 0, fontSize: 18 }}>Active projects</h2>
+            {d.active_projects.length === 0 ? (
+              <p style={{ color: "#94a3b8" }}>No active projects yet.</p>
+            ) : (
+              d.active_projects.map((p) => (
+                <div
+                  key={p.id}
+                  style={{ padding: "12px 0", borderTop: "1px solid #f1f5f9" }}
+                >
+                  <strong>{p.business_name}</strong>
+                  <div style={{ color: "#334155" }}>{p.name}</div>
+                  <div style={{ fontSize: 13, color: "#64748b", marginTop: 4 }}>
+                    {p.status} · {money(p.agreed_price)}
+                  </div>
+                </div>
+              ))
             )}
+          </div>
+
+          <div style={card}>
+            <h2 style={{ marginTop: 0, fontSize: 18 }}>Research queue</h2>
+            {d.research_queue.length === 0 ? (
+              <p style={{ color: "#94a3b8" }}>Nothing waiting to research.</p>
+            ) : (
+              d.research_queue.map((r) => (
+                <div
+                  key={r.id}
+                  style={{ padding: "12px 0", borderTop: "1px solid #f1f5f9" }}
+                >
+                  <strong>{r.business_name}</strong>
+                  <div style={{ fontSize: 13, color: "#64748b" }}>
+                    {r.website_url} · priority {r.priority}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div style={card}>
+            <h2 style={{ marginTop: 0, fontSize: 18 }}>Outreach drafts</h2>
+            <p style={{ marginTop: -6, color: "#64748b", fontSize: 13 }}>
+              Human approval required before anything is sent.
+            </p>
+            {d.outreach_drafts.length === 0 ? (
+              <p style={{ color: "#94a3b8" }}>No drafts waiting.</p>
+            ) : (
+              d.outreach_drafts.slice(0, 8).map((m) => (
+                <div
+                  key={m.id}
+                  style={{ padding: "12px 0", borderTop: "1px solid #f1f5f9" }}
+                >
+                  <strong>{m.business_name || "Prospect"}</strong>
+                  <div style={{ fontSize: 13, color: "#334155", marginTop: 2 }}>
+                    {m.subject}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
+                    {m.status} · {m.channel}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </section>
 
-      <section style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginTop:20}}>
-        <div style={{border:"1px solid #ddd",borderRadius:12,padding:20}}>
-          <h2 style={{marginTop:0}}>Research queue</h2>
-          {d.research_queue.length === 0 ? <p style={{color:"#777"}}>No pending research.</p> :
-            d.research_queue.map((r) =>
-              <div key={r.id} style={{padding:"12px 0",borderTop:"1px solid #eee"}}>
-                <strong>{r.business_name}</strong>
-                <div style={{fontSize:13,color:"#666"}}>{r.website_url} · priority {r.priority}</div>
-              </div>
-            )}
-        </div>
-        <div style={{border:"1px solid #ddd",borderRadius:12,padding:20}}>
-          <h2 style={{marginTop:0}}>Outreach drafts</h2>
-          {d.outreach_drafts.length === 0 ? <p style={{color:"#777"}}>No drafts awaiting review.</p> :
-            d.outreach_drafts.map((r) =>
-              <div key={r.id} style={{padding:"12px 0",borderTop:"1px solid #eee"}}>
-                <strong>{r.business_name}</strong>
-                <div style={{fontSize:13,color:"#666"}}>{r.subject}</div>
-                <div style={{fontSize:13,marginTop:4}}>Human approval required before sending.</div>
-              </div>
-            )}
-        </div>
-      </section>
-
-      <section style={{border:"1px solid #ddd",borderRadius:12,padding:20,marginTop:20}}>
-        <h2 style={{marginTop:0}}>Delivery tasks</h2>
-        {d.tasks.length === 0 ? <p style={{color:"#777"}}>No open delivery tasks.</p> :
-          d.tasks.map((t) =>
-            <div key={t.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:12,padding:"14px 0",borderTop:"1px solid #eee"}}>
+      <section style={{ ...card, marginTop: 16 }}>
+        <h2 style={{ marginTop: 0, fontSize: 18 }}>Open tasks</h2>
+        {d.tasks.length === 0 ? (
+          <p style={{ color: "#94a3b8" }}>No open tasks.</p>
+        ) : (
+          d.tasks.map((t) => (
+            <div
+              key={t.id}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                alignItems: "center",
+                padding: "12px 0",
+                borderTop: "1px solid #f1f5f9",
+              }}
+            >
               <div>
                 <strong>{t.title}</strong>
-                <div style={{fontSize:13,color:"#666"}}>{t.business_name} · {t.project_name} · {t.priority}</div>
-                {t.description && <div style={{fontSize:13,marginTop:4}}>{t.description}</div>}
+                <div style={{ fontSize: 13, color: "#64748b" }}>{t.status}</div>
               </div>
-              <select disabled={busy === t.id} value={t.status} onChange={e => taskStatus(t.id,e.target.value)}>
-                <option value="todo">To do</option>
-                <option value="in_progress">In progress</option>
-                <option value="blocked">Blocked</option>
-                <option value="done">Done</option>
-              </select>
+              <button
+                disabled={busy === t.id}
+                onClick={() => taskStatus(t.id, "done")}
+                style={{
+                  padding: "8px 12px",
+                  borderRadius: 8,
+                  border: "1px solid #e2e8f0",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  fontSize: 13,
+                }}
+              >
+                Mark done
+              </button>
             </div>
-          )}
+          ))
+        )}
       </section>
+
+      <footer
+        style={{
+          marginTop: 32,
+          paddingTop: 16,
+          borderTop: "1px solid #e2e8f0",
+          color: "#94a3b8",
+          fontSize: 13,
+          lineHeight: 1.5,
+        }}
+      >
+        <strong style={{ color: "#64748b" }}>How Luma is different:</strong> we map
+        observed website signals to specific services, write outreach in plain
+        language, and never send without your approval. Clients get a short brief —
+        not a feature dump.
+      </footer>
     </main>
   );
 }

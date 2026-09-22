@@ -691,6 +691,7 @@ from sales import (
     build_proposal_content,
     build_outreach_sequence,
     default_offer_scope,
+    build_client_brief,
 )
 
 
@@ -777,6 +778,49 @@ def prepare_call(opportunity_id: str):
                 (opportunity_id,),
             )
             return {"opportunity_id": opportunity_id, "activity_id": activity_id, "call_prep": prep}
+
+
+@app.post("/opportunities/{opportunity_id}/client-brief")
+def client_brief(opportunity_id: str):
+    """
+    Generate a one-page, client-friendly brief you can share with the prospect.
+    Plain language. What we noticed, why it matters, recommendation, price range.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            opportunity = _get_opportunity(cur, opportunity_id)
+            brief = build_client_brief(opportunity)
+            cur.execute(
+                """INSERT INTO activities
+                   (business_id, opportunity_id, type, subject, content, metadata)
+                   VALUES (%s, %s, 'client_brief', %s, %s, %s::jsonb)
+                   RETURNING id""",
+                (
+                    opportunity["business_id"],
+                    opportunity_id,
+                    brief["title"],
+                    brief["markdown"],
+                    json.dumps(
+                        {
+                            "generated_by": "client-brief-v1",
+                            "service": brief["service"],
+                        }
+                    ),
+                ),
+            )
+            activity_id = cur.fetchone()["id"]
+            cur.execute(
+                """UPDATE opportunities
+                   SET next_action = 'Share client brief or book discovery call',
+                       updated_at = now()
+                   WHERE id = %s""",
+                (opportunity_id,),
+            )
+            return {
+                "opportunity_id": opportunity_id,
+                "activity_id": activity_id,
+                "brief": brief,
+            }
 
 
 @app.post("/opportunities/{opportunity_id}/create-offer")
