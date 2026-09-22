@@ -17,7 +17,7 @@ from project_options import option_definitions, validate_options, option_summary
 from requirements import compile_requirements
 from revenue import revenue_summary, service_performance
 from workflows import workflow_definition, next_step
-from integrations import providers
+from integrations import providers, suggestions_for_service
 from security import authorized
 from portal import create_token, hash_token
 
@@ -307,6 +307,12 @@ def advance_workflow_run(run_id: str, payload: dict):
                 (step, status, json.dumps(payload.get("output") or {}), status, run_id),
             )
             return cur.fetchone()
+
+
+@app.get("/integrations/suggestions/{service_name}")
+def integration_suggestions(service_name: str):
+    suggestions = suggestions_for_service(service_name)
+    return {"service": service_name, "suggestions": [{**item, "providers": providers(item["category"])} for item in suggestions], "note": "Suggestions are optional. Connections become active only after configuration and verification."}
 
 
 @app.get("/integrations/providers")
@@ -1351,14 +1357,16 @@ def create_proposal(payload: dict):
                 raise HTTPException(status_code=404, detail="Offer not found for opportunity")
 
             content = build_proposal_content(opportunity["business_name"], offer, opportunity)
+            cur.execute("SELECT COALESCE(MAX(version), 0) + 1 AS version FROM proposals WHERE opportunity_id=%s", (opportunity_id,))
+            version = cur.fetchone()["version"]
             cur.execute(
                 """INSERT INTO proposals
-                   (opportunity_id, offer_id, title, status, total_amount,
+                   (opportunity_id, offer_id, title, version, status, total_amount,
                     recurring_amount, content, expires_at)
-                   VALUES (%s, %s, %s, 'draft', %s, %s, %s, CURRENT_DATE + 14)
+                   VALUES (%s, %s, %s, %s, 'draft', %s, %s, %s, CURRENT_DATE + 14)
                    RETURNING *""",
                 (
-                    opportunity_id, offer_id, offer["name"], offer["setup_price"],
+                    opportunity_id, offer_id, offer["name"], version, offer["setup_price"],
                     offer["recurring_price"], content,
                 ),
             )
