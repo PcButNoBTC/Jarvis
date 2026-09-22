@@ -781,12 +781,29 @@ def analyze_business(business_id: str):
                         o["description"],
                         json.dumps(o["factors"]),
                         o["score"],
+                        o.get("confidence"),
+                        o["description"],
+                        json.dumps(o["factors"]),
                         o["service"],
                     ),
                 )
                 row = cur.fetchone()
                 if row:
                     opportunity_ids.append(row["id"])
+                    for factor in o["factors"]:
+                        cur.execute(
+                            """INSERT INTO evidence_items
+                               (business_id, research_report_id, opportunity_id, evidence_type,
+                                observation, source_url, confidence, metadata)
+                               VALUES (%s,%s,%s,'website_observation',%s,%s,%s,%s::jsonb)""",
+                            (
+                                business_id, report_id, row["id"],
+                                factor.get("factor", "observed signal"),
+                                analysis.get("url"),
+                                o.get("confidence"),
+                                json.dumps({"points": factor.get("points", 0), "source": "website_analyzer"}),
+                            ),
+                        )
 
     return {
         "business_id": business_id,
