@@ -420,13 +420,17 @@ def create_billing(payload: dict):
 def mark_billing_paid(billing_id: str):
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT * FROM billing_records WHERE id=%s", (billing_id,))
+            record = cur.fetchone()
+            if not record:
+                raise HTTPException(status_code=404, detail="Billing record not found")
+            if record["status"] == "paid":
+                return {"billing": record, "revenue": None, "note": "Payment was already reconciled"}
             cur.execute(
                 "UPDATE billing_records SET status='paid', paid_at=now() WHERE id=%s RETURNING *",
                 (billing_id,),
             )
             record = cur.fetchone()
-            if not record:
-                raise HTTPException(status_code=404, detail="Billing record not found")
             cur.execute(
                 """INSERT INTO revenue_transactions
                    (client_id, project_id, amount, status, transaction_type, metadata)
