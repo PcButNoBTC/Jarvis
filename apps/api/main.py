@@ -14,6 +14,7 @@ from website_analyzer import analyze_website
 from delivery import generate_project, validate_project, package_project, deploy_static, check_live_url
 from project_options import option_definitions, validate_options, option_summary
 from requirements import compile_requirements
+from revenue import revenue_summary, service_performance
 
 app = FastAPI(title="Luma API", version="0.6.0")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -136,6 +137,69 @@ def get_project_configuration(project_id: str):
 @app.post("/projects/{project_id}/configuration")
 def save_project_configuration(project_id: str, payload: ProjectOptionUpdate):
     return save_project_options(project_id, payload)
+
+@app.get("/analytics/revenue")
+def analytics_revenue():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return {
+                "summary": revenue_summary(cur),
+                "services": service_performance(cur),
+            }
+
+
+@app.post("/analytics/revenue")
+def record_revenue(payload: dict):
+    required = {"amount"}
+    if not required.issubset(payload):
+        raise HTTPException(status_code=400, detail="amount is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO revenue_transactions
+                   (client_id, project_id, proposal_id, transaction_type, status,
+                    amount, recurring_amount, currency, external_id, metadata)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                   RETURNING *""",
+                (
+                    payload.get("client_id"), payload.get("project_id"), payload.get("proposal_id"),
+                    payload.get("transaction_type", "sale"), payload.get("status", "paid"),
+                    payload.get("amount", 0), payload.get("recurring_amount", 0),
+                    payload.get("currency", "USD"), payload.get("external_id"),
+                    json.dumps(payload.get("metadata") or {}),
+                ),
+            )
+            return cur.fetchone()
+
+
+@app.post("/analytics/costs")
+def record_cost(payload: dict):
+    if payload.get("amount") is None or not payload.get("category"):
+        raise HTTPException(status_code=400, detail="amount and category are required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO cost_records
+                   (project_id, agent_run_id, category, amount, currency, description, metadata)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb)
+                   RETURNING *""",
+                (
+                    payload.get("project_id"), payload.get("agent_run_id"), payload["category"],
+                    payload["amount"], payload.get("currency", "USD"), payload.get("description"),
+                    json.dumps(payload.get("metadata") or {}),
+                ),
+            )
+            return cur.fetchone()
+
+
+@app.get("/analytics/costs")
+def list_costs(limit: int = 100):
+    limit = max(1, min(limit, 500))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM cost_records ORDER BY occurred_at DESC LIMIT %s", (limit,))
+            return cur.fetchall()
+
 
 @app.get("/dashboard")
 def dashboard():
