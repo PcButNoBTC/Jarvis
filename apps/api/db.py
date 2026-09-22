@@ -135,6 +135,57 @@ def ensure_delivery_schema():
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_billing_status_due ON billing_records(status, due_at);
+    CREATE TABLE IF NOT EXISTS project_dependencies (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      depends_on_project_id UUID REFERENCES projects(id) ON DELETE SET NULL, dependency_type TEXT NOT NULL DEFAULT 'external',
+      name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', required BOOLEAN NOT NULL DEFAULT true,
+      metadata JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), completed_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_dependencies_project ON project_dependencies(project_id, status);
+    CREATE TABLE IF NOT EXISTS approval_history (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+      entity_type TEXT NOT NULL, entity_id UUID, approval_type TEXT NOT NULL, decision TEXT NOT NULL,
+      actor_type TEXT NOT NULL DEFAULT 'human', actor_id UUID, notes TEXT, metadata JSONB NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_approval_history_entity ON approval_history(entity_type, entity_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS revision_requests (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      implementation_id UUID REFERENCES implementations(id) ON DELETE SET NULL, requested_by TEXT NOT NULL DEFAULT 'client',
+      status TEXT NOT NULL DEFAULT 'requested', summary TEXT NOT NULL, details TEXT, priority TEXT NOT NULL DEFAULT 'normal',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(), resolved_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_revision_requests_project ON revision_requests(project_id, status, created_at DESC);
+    CREATE TABLE IF NOT EXISTS recurring_revenue (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
+      project_id UUID REFERENCES projects(id) ON DELETE SET NULL, billing_record_id UUID REFERENCES billing_records(id) ON DELETE SET NULL,
+      amount NUMERIC(12,2) NOT NULL DEFAULT 0, currency TEXT NOT NULL DEFAULT 'USD', interval TEXT NOT NULL DEFAULT 'month',
+      status TEXT NOT NULL DEFAULT 'active', started_at TIMESTAMPTZ NOT NULL DEFAULT now(), next_billing_at TIMESTAMPTZ,
+      cancelled_at TIMESTAMPTZ, metadata JSONB NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_recurring_revenue_status_next ON recurring_revenue(status, next_billing_at);
+    CREATE TABLE IF NOT EXISTS automation_schedules (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), workflow_name TEXT NOT NULL, cron_expression TEXT NOT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT true, input JSONB NOT NULL DEFAULT '{}', last_run_at TIMESTAMPTZ,
+      next_run_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_automation_schedules_due ON automation_schedules(enabled, next_run_at);
+    CREATE TABLE IF NOT EXISTS agent_policies (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), agent_name TEXT UNIQUE NOT NULL, budget_usd NUMERIC(12,4) NOT NULL DEFAULT 0,
+      tools JSONB NOT NULL DEFAULT '[]', enabled BOOLEAN NOT NULL DEFAULT true, approval_required BOOLEAN NOT NULL DEFAULT true,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS agent_evaluations (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), agent_run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
+      agent_name TEXT NOT NULL, evaluator TEXT NOT NULL DEFAULT 'human', score NUMERIC(5,2), passed BOOLEAN,
+      feedback TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS secret_references (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), owner_type TEXT NOT NULL, owner_id UUID, provider TEXT NOT NULL,
+      reference TEXT UNIQUE NOT NULL, status TEXT NOT NULL DEFAULT 'active', metadata JSONB NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(), revoked_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_secret_references_owner ON secret_references(owner_type, owner_id, status);
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
