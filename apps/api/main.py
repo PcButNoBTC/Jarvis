@@ -15,6 +15,8 @@ from delivery import generate_project, validate_project, package_project, deploy
 from project_options import option_definitions, validate_options, option_summary
 from requirements import compile_requirements
 from revenue import revenue_summary, service_performance
+from workflows import workflow_definition, next_step
+from integrations import providers
 
 app = FastAPI(title="Luma API", version="0.6.0")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -199,6 +201,120 @@ def list_costs(limit: int = 100):
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM cost_records ORDER BY occurred_at DESC LIMIT %s", (limit,))
             return cur.fetchall()
+
+
+@app.get("/automation/workflows")
+def list_workflows():
+    return [
+        {"name": name, **definition}
+        for name, definition in {
+            "proposal_follow_up": workflow_definition("proposal_follow_up"),
+            "project_delivery": workflow_definition("project_delivery"),
+            "research": workflow_definition("research"),
+        }.items()
+    ]
+
+
+@app.get("/automation/workflows/{workflow_name}")
+def get_workflow(workflow_name: str, current_step: str | None = None):
+    try:
+        definition = workflow_definition(workflow_name)
+        return {
+            **definition,
+            "next_step": next_step(workflow_name, current_step),
+            "requires_human_approval": definition["external_action"] is not None,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@app.post("/automation/runs")
+def create_workflow_run(payload: dict):
+    name = payload.get("workflow_name")
+    if not name:
+        raise HTTPException(status_code=400, detail="workflow_name is required")
+    try:
+        definition = workflow_definition(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO workflow_runs
+                   (workflow_name, trigger_type, entity_type, entity_id, status, current_step, input)
+                   VALUES (%s,%s,%s,%s,'pending',%s,%s::jsonb)
+                   RETURNING *""",
+                (
+                    name, payload.get("trigger_type", "manual"), payload.get("entity_type"),
+                    payload.get("entity_id"), definition["steps"][0],
+                    json.dumps(payload.get("input") or {}),
+                ),
+            )
+            return cur.fetchone()
+
+
+@app.patch("/automation/runs/{run_id}")
+def advance_workflow_run(run_id: str, payload: dict):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workflow_runs WHERE id=%s", (run_id,))
+            run = cur.fetchone()
+            if not run:
+                raise HTTPException(status_code=404, detail="Workflow run not found")
+            try:
+                step = next_step(run["workflow_name"], run["current_step"])
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc))
+            status = payload.get("status") or ("completed" if step is None else "running")
+            cur.execute(
+                """UPDATE workflow_runs
+                   SET current_step=%s, status=%s, output=%s::jsonb,
+                       completed_at=CASE WHEN %s='completed' THEN now() ELSE completed_at END
+                   WHERE id=%s RETURNING *""",
+                (step, status, json.dumps(payload.get("output") or {}), status, run_id),
+            )
+            return cur.fetchone()
+
+
+@app.get("/integrations/providers")
+def integration_providers(category: str | None = None):
+    return {"category": category, "providers": providers(category)}
+
+
+@app.get("/integrations")
+def list_integrations(project_id: str | None = None, client_id: str | None = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if project_id:
+                cur.execute("SELECT * FROM integration_connections WHERE project_id=%s ORDER BY created_at DESC", (project_id,))
+            elif client_id:
+                cur.execute("SELECT * FROM integration_connections WHERE client_id=%s ORDER BY created_at DESC", (client_id,))
+            else:
+                cur.execute("SELECT * FROM integration_connections ORDER BY created_at DESC LIMIT 200")
+            return cur.fetchall()
+
+
+@app.post("/integrations")
+def create_integration(payload: dict):
+    if not payload.get("provider") or not payload.get("category"):
+        raise HTTPException(status_code=400, detail="provider and category are required")
+    allowed = {item["provider"] for item in providers(payload["category"])}
+    if payload["provider"] not in allowed:
+        raise HTTPException(status_code=400, detail="Unknown provider for integration category")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO integration_connections
+                   (client_id, project_id, provider, category, status, capabilities, secret_ref, metadata)
+                   VALUES (%s,%s,%s,%s,'pending',%s::jsonb,%s,%s::jsonb)
+                   RETURNING *""",
+                (
+                    payload.get("client_id"), payload.get("project_id"), payload["provider"], payload["category"],
+                    json.dumps(next(item["capabilities"] for item in providers(payload["category"]) if item["provider"] == payload["provider"])),
+                    payload.get("secret_ref"), json.dumps(payload.get("metadata") or {}),
+                ),
+            )
+            return cur.fetchone()
 
 
 @app.get("/dashboard")
