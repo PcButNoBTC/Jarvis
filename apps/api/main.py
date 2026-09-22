@@ -2550,3 +2550,40 @@ def claim_due_schedule():
                    WHERE id=%s RETURNING *""",(now,following,row["id"])
             )
             return {"claimed":True,"schedule":cur.fetchone()}
+
+
+@app.get("/analytics/model-costs")
+def analytics_model_costs():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT agent_name, COUNT(*) AS runs,
+                          COALESCE(SUM(input_tokens),0) AS input_tokens,
+                          COALESCE(SUM(output_tokens),0) AS output_tokens,
+                          COALESCE(SUM(estimated_cost),0) AS estimated_cost
+                   FROM agent_runs GROUP BY agent_name ORDER BY estimated_cost DESC"""
+            )
+            return cur.fetchall()
+
+@app.get("/analytics/margins")
+def analytics_margins():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT p.id AS project_id, p.name, b.name AS business_name,
+                          COALESCE(SUM(CASE WHEN rt.status='paid' THEN rt.amount ELSE 0 END),0) AS revenue,
+                          COALESCE((SELECT SUM(cr.amount) FROM cost_records cr WHERE cr.project_id=p.id),0) AS direct_costs,
+                          COALESCE((SELECT SUM(ar.estimated_cost) FROM agent_runs ar WHERE ar.entity_type='project' AND ar.entity_id=p.id),0) AS model_costs
+                   FROM projects p
+                   JOIN clients c ON c.id=p.client_id
+                   JOIN businesses b ON b.id=c.business_id
+                   LEFT JOIN revenue_transactions rt ON rt.project_id=p.id
+                   GROUP BY p.id,p.name,b.name ORDER BY revenue DESC"""
+            )
+            rows=cur.fetchall()
+            return [
+                {**row,
+                 "total_cost": float(row["direct_costs"] or 0)+float(row["model_costs"] or 0),
+                 "contribution": float(row["revenue"] or 0)-float(row["direct_costs"] or 0)-float(row["model_costs"] or 0)}
+                for row in rows
+            ]
