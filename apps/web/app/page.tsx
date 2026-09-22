@@ -16,6 +16,8 @@ type Dashboard = {
   opportunities_queue: any[];
   active_projects: any[];
   tasks: any[];
+  research_queue: any[];
+  outreach_drafts: any[];
 };
 
 const money = (value: number) => new Intl.NumberFormat("en-US", {
@@ -50,7 +52,7 @@ export default function Home() {
   const d = data || {
     businesses:0, opportunities:0, proposals:0, clients:0, projects:0,
     open_tasks:0, pipeline_value:0, won_revenue:0,
-    opportunities_queue:[], active_projects:[], tasks:[]
+    opportunities_queue:[], active_projects:[], tasks:[], research_queue:[], outreach_drafts:[]
   };
 
   return (
@@ -65,7 +67,7 @@ export default function Home() {
 
       <section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginTop:24}}>
         {[
-          ["Pipeline", money(d.pipeline_value)],
+          ["Potential pipeline", money(d.pipeline_value)],
           ["Won revenue", money(d.won_revenue)],
           ["Opportunities", d.opportunities],
           ["Proposals", d.proposals],
@@ -107,6 +109,30 @@ export default function Home() {
                 <strong>{p.business_name}</strong>
                 <div>{p.name}</div>
                 <div style={{fontSize:13,color:"#666"}}>{p.status} · {money(p.agreed_price)}</div>
+              </div>
+            )}
+        </div>
+      </section>
+
+      <section style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20,marginTop:20}}>
+        <div style={{border:"1px solid #ddd",borderRadius:12,padding:20}}>
+          <h2 style={{marginTop:0}}>Research queue</h2>
+          {d.research_queue.length === 0 ? <p style={{color:"#777"}}>No pending research.</p> :
+            d.research_queue.map((r) =>
+              <div key={r.id} style={{padding:"12px 0",borderTop:"1px solid #eee"}}>
+                <strong>{r.business_name}</strong>
+                <div style={{fontSize:13,color:"#666"}}>{r.website_url} · priority {r.priority}</div>
+              </div>
+            )}
+        </div>
+        <div style={{border:"1px solid #ddd",borderRadius:12,padding:20}}>
+          <h2 style={{marginTop:0}}>Outreach drafts</h2>
+          {d.outreach_drafts.length === 0 ? <p style={{color:"#777"}}>No drafts awaiting review.</p> :
+            d.outreach_drafts.map((r) =>
+              <div key={r.id} style={{padding:"12px 0",borderTop:"1px solid #eee"}}>
+                <strong>{r.business_name}</strong>
+                <div style={{fontSize:13,color:"#666"}}>{r.subject}</div>
+                <div style={{fontSize:13,marginTop:4}}>Human approval required before sending.</div>
               </div>
             )}
         </div>
