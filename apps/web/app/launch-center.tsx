@@ -11,6 +11,7 @@ type Readiness = {
   checklist: { key: string; label: string; required: boolean; complete: boolean; help: string }[];
   settings: Record<string, any>;
   suggestions: { category: string; name: string; url: string; reason: string }[];
+  launch_options: { key: string; name: string; category: string; description: string }[];
 };
 
 const inputStyle: React.CSSProperties = {
@@ -111,44 +112,70 @@ export default function LaunchCenter({ projects }: { projects: Project[] }) {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12, marginTop: 16 }}>
-            <label>Production domain
+            <label>Launch path
+              <select value={settings.launch_mode || "prepare_and_client_launch"} onChange={e => set("launch_mode", e.target.value)} style={inputStyle}>
+                <option value="prepare_and_client_launch">Prepare package for client launch</option>
+                <option value="luma_deploy">Luma deploys after approval</option>
+              </select>
+            </label>
+            <label>Hosting / deployment option
+              <select value={settings.hosting_option || ""} onChange={e => set("hosting_option", e.target.value)} style={inputStyle}>
+                <option value="">Choose an option</option>
+                {(readiness?.launch_options || []).map(o => <option key={o.key} value={o.key}>{o.name}</option>)}
+              </select>
+            </label>
+            <label>Custom provider / target
+              <input value={settings.hosting_provider || ""} onChange={e => set("hosting_provider", e.target.value)} placeholder="Only for custom hosting" style={inputStyle} />
+            </label>
+            {readiness?.service === "AI Website" && <label>Production domain
               <input value={settings.domain || ""} onChange={e => set("domain", e.target.value)} placeholder="example.com" style={inputStyle} />
-            </label>
-            <label>Hosting / deployment target
-              <input value={settings.hosting_provider || ""} onChange={e => set("hosting_provider", e.target.value)} placeholder="Cloudflare Pages, Vercel, Netlify, or client host" style={inputStyle} />
-            </label>
-            <label>Hosting account / access confirmed
+            </label>}
+            {settings.launch_mode === "luma_deploy" && <label>Hosting access confirmed
               <select value={String(!!settings.hosting_access)} onChange={e => set("hosting_access", e.target.value === "true")} style={inputStyle}>
                 <option value="false">Not yet</option><option value="true">Confirmed</option>
               </select>
-            </label>
-            <label>DNS access confirmed
+            </label>}
+            {readiness?.service === "AI Website" && settings.launch_mode === "luma_deploy" && <label>DNS access confirmed
               <select value={String(!!settings.dns_access)} onChange={e => set("dns_access", e.target.value === "true")} style={inputStyle}>
                 <option value="false">Not yet</option><option value="true">Confirmed</option>
               </select>
-            </label>
-            <label>HTTPS / SSL confirmed
+            </label>}
+            {readiness?.service === "AI Website" && settings.launch_mode === "luma_deploy" && <label>HTTPS / SSL confirmed
               <select value={String(!!settings.ssl_ready)} onChange={e => set("ssl_ready", e.target.value === "true")} style={inputStyle}>
                 <option value="false">Not yet</option><option value="true">Confirmed</option>
               </select>
-            </label>
+            </label>}
             <label>Primary contact email
               <input value={settings.contact_email || ""} onChange={e => set("contact_email", e.target.value)} placeholder="client@example.com" style={inputStyle} />
             </label>
-            <label>Business phone
-              <input value={settings.phone || ""} onChange={e => set("phone", e.target.value)} placeholder="+1 555 555 5555" style={inputStyle} />
-            </label>
-            <label>Production URL
+            {readiness?.service === "AI Website" && settings.launch_mode === "luma_deploy" && <label>Production URL
               <input value={settings.production_url || ""} onChange={e => set("production_url", e.target.value)} placeholder="https://example.com" style={inputStyle} />
-            </label>
+            </label>}
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12, marginTop: 12 }}>
-            <label>Approved production copy/assets
+            {readiness?.service === "AI Website" ? <label>Approved production copy/assets
               <select value={String(!!settings.content_approved)} onChange={e => set("content_approved", e.target.value === "true")} style={inputStyle}>
                 <option value="false">Not yet</option><option value="true">Approved</option>
               </select>
-            </label>
+            </label> : <label>Requirements approved
+              <select value={String(!!settings.requirements_approved)} onChange={e => set("requirements_approved", e.target.value === "true")} style={inputStyle}>
+                <option value="false">Not yet</option><option value="true">Approved</option>
+              </select>
+            </label>}
+            {readiness?.service && readiness.service !== "AI Website" && <label>Provider / platform
+              <input value={settings.provider_selected || ""} onChange={e => set("provider_selected", e.target.value)} placeholder="Calendar, CRM, phone system, etc." style={inputStyle} />
+            </label>}
+            {readiness?.service && readiness.service !== "AI Website" && <label>Credentials/access confirmed
+              <select value={String(!!settings.credentials_ready)} onChange={e => set("credentials_ready", e.target.value === "true")} style={inputStyle}>
+                <option value="false">Not yet</option><option value="true">Confirmed</option>
+              </select>
+            </label>}
+            {readiness?.service && readiness.service !== "AI Website" && <label>Production test approved
+              <select value={String(!!settings.test_approved)} onChange={e => set("test_approved", e.target.value === "true")} style={inputStyle}>
+                <option value="false">Not yet</option><option value="true">Approved</option>
+              </select>
+            </label>}
             <label>Privacy policy URL
               <input value={settings.privacy_url || ""} onChange={e => set("privacy_url", e.target.value)} placeholder="https://example.com/privacy" style={inputStyle} />
             </label>
@@ -159,6 +186,15 @@ export default function LaunchCenter({ projects }: { projects: Project[] }) {
               <input value={settings.analytics || ""} onChange={e => set("analytics", e.target.value)} placeholder="GA4, Plausible, none, etc." style={inputStyle} />
             </label>
           </div>
+
+          {readiness?.launch_options?.length ? <div style={{ marginTop: 18 }}>
+            <h3 style={{ fontSize: 15, marginBottom: 8 }}>Available launch options</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
+              {readiness.launch_options.map(o => <button key={o.key} onClick={() => set("hosting_option", o.key)} style={{ ...buttonStyle, textAlign: "left" }}>
+                <strong>{o.name}</strong><div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>{o.description}</div>
+              </button>)}
+            </div>
+          </div> : null}
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 }}>
             <button disabled={busy} onClick={save} style={{ ...buttonStyle, background: "#4f46e5", color: "#fff", border: "none" }}>
