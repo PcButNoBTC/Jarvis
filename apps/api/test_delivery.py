@@ -35,3 +35,25 @@ def test_workflow_delivery_generates_activation_package(tmp_path, monkeypatch):
     result = generate_project(project)
     assert "workflow.json" in result["files"]
     assert validate_project(project)["passed"] is True
+
+
+def test_lead_capture_delivery_generates_service_specific_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setattr("delivery.DELIVERY_ROOT", tmp_path)
+    project = {
+        "id": "project-lead-1",
+        "business_name": "Acme Roofing",
+        "service_name": "Lead Capture System",
+        "requirements": {
+            "configuration": {
+                "capture_destination": "crm",
+                "notification_channel": "email",
+                "qualification": "ai_assisted",
+                "delivery_destination": "Acme CRM",
+            }
+        },
+    }
+    result = generate_project(project)
+    assert "lead-form.html" in result["files"]
+    assert "ROUTING.md" in result["files"]
+    assert "TEST-PLAN.md" in result["files"]
+    assert validate_project(project)["passed"] is True
