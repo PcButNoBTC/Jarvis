@@ -180,6 +180,7 @@ def validate_project(project: dict[str, Any]) -> dict[str, Any]:
             {"name": "index_exists", "passed": index.exists()},
             {"name": "mobile_viewport", "passed": 'name="viewport"' in html},
             {"name": "primary_cta", "passed": 'href="#contact"' in html or "mailto:" in html},
+            {"name": "deployment_instructions", "passed": (workspace / "DEPLOY.md").exists()},
         ])
     else:
         checks.extend([
