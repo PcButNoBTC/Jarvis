@@ -290,3 +290,12 @@ CI runs Python compile checks and qualification tests on push/PR.
 4. Delivery is tracked as a project with clear tasks.
 
 That is the product promise: **evidence, clarity, human control**.
+
+
+## Client launch center
+
+Projects now include a launch-readiness workflow. Before Luma will deploy an AI Website, the client/operator must confirm the production domain, hosting/deployment target, hosting access, DNS access, HTTPS/SSL, approved production content/assets, primary contact email, and final production URL.
+
+The dashboard exposes these requirements in **Client Launch Center** and provides optional resource suggestions for hosting, DNS, forms, and analytics. The generated delivery package also includes `CLIENT-LAUNCH.md`.
+
+Luma never fabricates third-party credentials or creates external accounts on the client's behalf. External providers remain explicit client-controlled dependencies.
