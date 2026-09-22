@@ -8,7 +8,7 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Configuration → compiled requirements
 - [x] Requirements persisted on project and implementation
 - [x] Service adapter build-plan layer
-- [ ] Provider-specific artifact generators
+- [x] Provider-specific artifact generators
 - [ ] Configuration-aware automated QA
 
 ## Phase 2 — Opportunity and sales intelligence
