@@ -18,6 +18,7 @@ def test_static_site_delivery_generates_and_validates(tmp_path, monkeypatch):
     }
     result = generate_project(project)
     assert "site/index.html" in result["files"]
+    assert "CLIENT-LAUNCH.md" in result["files"]
     assert validate_project(project)["passed"] is True
     archive = package_project(project)
     assert archive.exists()
