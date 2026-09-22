@@ -88,3 +88,18 @@ Outbound communication is still not automatically sent. Human approval remains t
 ## Naming
 
 The AI operator is named **Luma**. The GitHub repository remains **Jarvis** for continuity with the existing project infrastructure.
+
+
+## V1.3 Discovery + research queue
+
+Luma now has a controlled discovery foundation:
+
+- `POST /prospects/ingest` — ingest or update a prospect with source metadata.
+- `POST /businesses/{id}/research` — enqueue website research.
+- `GET /research/jobs` — inspect the research queue.
+- `POST /research/jobs/{id}/run` — execute one research job.
+- The worker polls the queue and asks the API to run research.
+- `POST /outreach/drafts` — create an evidence-based outbound draft.
+- `GET /outreach/drafts` — review drafts awaiting human approval.
+
+Deduplication prefers a source external ID, then email, then normalized website domain, then business name. The system does not auto-send outbound messages. Source adapters should only use data sources whose automation terms and applicable laws permit the intended use.
