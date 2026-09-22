@@ -51,14 +51,15 @@ def service_performance(cur) -> list[dict]:
         SELECT s.name AS service,
                COUNT(DISTINCT o.id) AS opportunities,
                COUNT(DISTINCT CASE WHEN o.status='won' THEN o.id END) AS won_opportunities,
-               COALESCE(SUM(CASE WHEN rt.status='paid' THEN rt.amount ELSE 0 END),0) AS paid_revenue,
-               COALESCE(SUM(cr.amount),0) AS costs
+               COALESCE((SELECT SUM(rt.amount) FROM revenue_transactions rt
+                         JOIN projects rp ON rp.id=rt.project_id
+                         WHERE rp.service_id=s.id AND rt.status='paid'),0) AS paid_revenue,
+               COALESCE((SELECT SUM(cr.amount) FROM cost_records cr
+                         JOIN projects cp ON cp.id=cr.project_id
+                         WHERE cp.service_id=s.id),0) AS costs
         FROM services s
         LEFT JOIN opportunities o ON o.service_id=s.id
-        LEFT JOIN projects p ON p.service_id=s.id
-        LEFT JOIN revenue_transactions rt ON rt.project_id=p.id
-        LEFT JOIN cost_records cr ON cr.project_id=p.id
-        GROUP BY s.name
+        GROUP BY s.id, s.name
         ORDER BY paid_revenue DESC, opportunities DESC
     """)
     rows = []
