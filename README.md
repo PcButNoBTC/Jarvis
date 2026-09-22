@@ -296,6 +296,6 @@ That is the product promise: **evidence, clarity, human control**.
 
 Projects now include a launch-readiness workflow. Before Luma will deploy an AI Website, the client/operator must confirm the production domain, hosting/deployment target, hosting access, DNS access, HTTPS/SSL, approved production content/assets, primary contact email, and final production URL.
 
-The dashboard exposes these requirements in **Client Launch Center** and provides optional resource suggestions for hosting, DNS, forms, and analytics. The generated delivery package also includes `CLIENT-LAUNCH.md`.
+The dashboard exposes these requirements in the optional **Client Launch Center** module. Launch Center is one delivery option among the broader Luma project workflow, not a replacement for it. The available launch path and required fields change by service. It provides selectable hosting/deployment options plus optional resource suggestions for hosting, DNS, forms, and analytics. The generated delivery package also includes `CLIENT-LAUNCH.md`.
 
 Luma never fabricates third-party credentials or creates external accounts on the client's behalf. External providers remain explicit client-controlled dependencies.
