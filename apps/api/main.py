@@ -131,12 +131,25 @@ def dashboard():
                     LIMIT 12
                 """)
                 counts["tasks"] = cur.fetchall()
+
+                cur.execute("""SELECT r.id, r.priority, r.scheduled_at, b.name AS business_name, b.website_url
+                               FROM research_jobs r JOIN businesses b ON b.id=r.business_id
+                               WHERE r.status='pending'
+                               ORDER BY r.priority DESC, r.scheduled_at, r.created_at LIMIT 10""")
+                counts["research_queue"] = cur.fetchall()
+
+                cur.execute("""SELECT m.id, m.subject, m.created_at, b.name AS business_name, b.email
+                               FROM messages m JOIN businesses b ON b.id=m.business_id
+                               WHERE m.status='draft' AND m.direction='outbound'
+                               ORDER BY m.created_at DESC LIMIT 10""")
+                counts["outreach_drafts"] = cur.fetchall()
                 return counts
     except Exception:
         return {
             "businesses": 0, "opportunities": 0, "proposals": 0, "clients": 0,
             "projects": 0, "open_tasks": 0, "pipeline_value": 0,
-            "won_revenue": 0, "opportunities_queue": [], "active_projects": [], "tasks": []
+            "won_revenue": 0, "opportunities_queue": [], "active_projects": [], "tasks": [],
+            "research_queue": [], "outreach_drafts": []
         }
 
 
