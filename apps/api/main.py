@@ -26,6 +26,22 @@ class WebsiteAnalyzeRequest(BaseModel):
     url: HttpUrl
 
 
+class ProspectIngest(BaseModel):
+    name: str
+    website_url: HttpUrl | None = None
+    industry: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    source: str = "manual"
+    source_url: str | None = None
+    source_external_id: str | None = None
+    notes: str | None = None
+
+
+class ResearchEnqueue(BaseModel):
+    priority: int = 50
+
+
 @app.get("/")
 def root():
     return {"name": "Luma", "version": "0.2.0", "status": "running"}
@@ -148,6 +164,169 @@ def create_business(payload: BusinessCreate):
                 return cur.fetchone()
     except psycopg.errors.UniqueViolation:
         raise HTTPException(status_code=409, detail="Business already exists")
+
+
+@app.post("/prospects/ingest")
+def ingest_prospect(payload: ProspectIngest):
+    website = str(payload.website_url) if payload.website_url else None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT * FROM businesses
+                   WHERE (%s IS NOT NULL AND source = %s AND source_external_id = %s)
+                      OR (%s IS NOT NULL AND lower(regexp_replace(website_url, '^https?://(www\\.)?', '')) =
+                          lower(regexp_replace(%s, '^https?://(www\\.)?', '')))
+                      OR (%s IS NOT NULL AND lower(email) = lower(%s))
+                   LIMIT 1""",
+                (payload.source_external_id, payload.source, payload.source_external_id,
+                 website, website, payload.email, payload.email),
+            )
+            existing = cur.fetchone()
+            if existing:
+                cur.execute(
+                    """UPDATE businesses SET
+                       name=COALESCE(%s,name), industry=COALESCE(%s,industry),
+                       phone=COALESCE(%s,phone), email=COALESCE(%s,email),
+                       website_url=COALESCE(%s,website_url),
+                       source_url=COALESCE(%s,source_url),
+                       source_external_id=COALESCE(%s,source_external_id),
+                       notes=COALESCE(%s,notes), updated_at=now()
+                       WHERE id=%s RETURNING *""",
+                    (payload.name,payload.industry,payload.phone,payload.email,website,
+                     payload.source_url,payload.source_external_id,payload.notes,existing["id"]),
+                )
+                return {"action":"updated","business":cur.fetchone()}
+            cur.execute(
+                """INSERT INTO businesses
+                   (name,website_url,industry,phone,email,source,source_url,source_external_id,notes)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+                (payload.name,website,payload.industry,payload.phone,payload.email,payload.source,
+                 payload.source_url,payload.source_external_id,payload.notes),
+            )
+            return {"action":"created","business":cur.fetchone()}
+
+
+@app.post("/businesses/{business_id}/research")
+def enqueue_research(business_id: str, payload: ResearchEnqueue | None = None):
+    priority = max(0, min((payload or ResearchEnqueue()).priority, 100))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, website_url FROM businesses WHERE id=%s",(business_id,))
+            business=cur.fetchone()
+            if not business: raise HTTPException(status_code=404, detail="Business not found")
+            if not business["website_url"]: raise HTTPException(status_code=400, detail="Business has no website URL")
+            cur.execute("""INSERT INTO research_jobs (business_id,priority) VALUES (%s,%s)
+                           ON CONFLICT DO NOTHING RETURNING *""",(business_id,priority))
+            job=cur.fetchone()
+            if job: return job
+            cur.execute("""SELECT * FROM research_jobs WHERE business_id=%s
+                           AND status IN ('pending','running') ORDER BY created_at DESC LIMIT 1""",(business_id,))
+            return cur.fetchone()
+
+
+@app.get("/research/jobs")
+def list_research_jobs(status: str="pending", limit: int=20):
+    if status not in {"pending","running","completed","failed"}:
+        raise HTTPException(status_code=400, detail="Invalid research job status")
+    limit=max(1,min(limit,100))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT r.*,b.name AS business_name,b.website_url
+                           FROM research_jobs r JOIN businesses b ON b.id=r.business_id
+                           WHERE r.status=%s ORDER BY r.priority DESC,r.scheduled_at,r.created_at LIMIT %s""",
+                        (status,limit))
+            return cur.fetchall()
+
+
+@app.post("/research/jobs/{job_id}/run")
+def run_research_job(job_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""UPDATE research_jobs SET status='running',attempts=attempts+1,
+                           locked_at=now(),updated_at=now()
+                           WHERE id=%s AND status='pending' RETURNING *""",(job_id,))
+            job=cur.fetchone()
+            if not job: raise HTTPException(status_code=409, detail="Research job is not pending")
+            cur.execute("SELECT * FROM businesses WHERE id=%s",(job["business_id"],))
+            business=cur.fetchone()
+    try:
+        analysis=analyze_website(business["website_url"])
+        qualification=score_opportunity(analysis,"AI Website")
+        evidence=qualification["factors"]
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO websites
+                    (business_id,url,http_status,https_enabled,mobile_friendly,load_time_ms,cms,technology_stack,last_checked_at)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,'[]'::jsonb,now()) RETURNING id""",
+                    (business["id"],analysis["url"],analysis["http_status"],analysis["https"],
+                     analysis["has_mobile_viewport"],analysis["response_time_ms"],analysis["cms"]))
+                website_id=cur.fetchone()["id"]
+                cur.execute("""INSERT INTO research_reports
+                    (business_id,summary,observed_problems,opportunities,evidence,model,prompt_version)
+                    VALUES (%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s) RETURNING id""",
+                    (business["id"],"Automated website research based only on observed technical signals.",
+                     json.dumps(evidence),json.dumps([{"service":"AI Website","score":qualification["score"]}]),
+                     json.dumps(analysis),"heuristic","website-analysis-v1"))
+                report_id=cur.fetchone()["id"]
+                cur.execute("""INSERT INTO opportunities
+                    (business_id,research_report_id,title,description,problem_evidence,score,
+                     estimated_value_min,estimated_value_max,status,next_action,service_id)
+                    SELECT %s,%s,%s,%s,%s::jsonb,%s,price_min,price_max,
+                           'new','Review evidence and approve outreach',id
+                    FROM services WHERE name='AI Website' RETURNING id""",
+                    (business["id"],report_id,"Website improvement opportunity",
+                     "Observed website signals that may justify a website improvement conversation.",
+                     json.dumps(evidence),qualification["score"]))
+                opportunity=cur.fetchone()
+                cur.execute("""UPDATE research_jobs SET status='completed',completed_at=now(),
+                               locked_at=NULL,last_error=NULL,updated_at=now() WHERE id=%s""",(job_id,))
+                return {"job_id":job_id,"business_id":business["id"],"website_id":website_id,
+                        "research_report_id":report_id,"opportunity_id":opportunity["id"] if opportunity else None,
+                        "qualification":qualification}
+    except Exception as exc:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""UPDATE research_jobs SET status='failed',last_error=%s,
+                               locked_at=NULL,updated_at=now() WHERE id=%s""",
+                            (f"{type(exc).__name__}: {exc}",job_id))
+        raise HTTPException(status_code=500, detail="Research job failed")
+
+
+@app.post("/outreach/drafts")
+def create_outreach_draft(opportunity_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT o.*,b.name AS business_name,b.email AS business_email
+                           FROM opportunities o JOIN businesses b ON b.id=o.business_id WHERE o.id=%s""",(opportunity_id,))
+            opportunity=cur.fetchone()
+            if not opportunity: raise HTTPException(status_code=404,detail="Opportunity not found")
+            if not opportunity["business_email"]: raise HTTPException(status_code=400,detail="Business has no email")
+            evidence=opportunity["problem_evidence"] or []
+            evidence_text=", ".join(item.get("factor","observed issue") for item in evidence[:3])
+            subject="A quick idea for "+opportunity["business_name"]
+            body=(f"Hi,\n\nI reviewed {opportunity['business_name']}'s website and noticed "
+                  f"{evidence_text or 'a few areas worth reviewing'}. "
+                  "I can share a short, specific improvement plan if useful.\n\nBest,\nLuma")
+            cur.execute("""INSERT INTO messages
+                (business_id,opportunity_id,channel,direction,subject,body,status)
+                VALUES (%s,%s,'email','outbound',%s,%s,'draft') RETURNING *""",
+                (opportunity["business_id"],opportunity_id,subject,body))
+            cur.execute("""UPDATE opportunities SET next_action='Human review of outreach draft',updated_at=now()
+                           WHERE id=%s""",(opportunity_id,))
+            return cur.fetchone()
+
+
+@app.get("/outreach/drafts")
+def list_outreach_drafts(limit: int=50):
+    limit=max(1,min(limit,200))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT m.*,b.name AS business_name,b.email AS business_email,o.title AS opportunity_title
+                           FROM messages m JOIN businesses b ON b.id=m.business_id
+                           LEFT JOIN opportunities o ON o.id=m.opportunity_id
+                           WHERE m.status='draft' AND m.direction='outbound'
+                           ORDER BY m.created_at DESC LIMIT %s""",(limit,))
+            return cur.fetchall()
 
 
 @app.get("/businesses")
