@@ -99,8 +99,6 @@ CREATE TABLE IF NOT EXISTS offers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE proposals ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;
-
 CREATE TABLE IF NOT EXISTS proposals (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   opportunity_id UUID REFERENCES opportunities(id) ON DELETE SET NULL,
@@ -115,6 +113,8 @@ CREATE TABLE IF NOT EXISTS proposals (
   expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS clients (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
