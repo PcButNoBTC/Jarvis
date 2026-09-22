@@ -1233,7 +1233,7 @@ def deploy_project_delivery(project_id: str):
                 """INSERT INTO deployment_runs
                    (project_id, implementation_id, status, target, approved_at, started_at)
                    VALUES (%s,%s,'running',%s,now(),now()) RETURNING *""",
-                (project_id, implementation["id"], target_root or os.getenv("LUMA_DEPLOY_ROOT")),
+                (project_id, implementation["id"], os.getenv("LUMA_DEPLOY_ROOT")),
             )
             run = cur.fetchone()
     project["requirements"] = implementation.get("requirements") or project.get("requirements") or {}
