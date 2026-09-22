@@ -17,8 +17,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Evidence ledger
 - [x] Opportunity lifecycle endpoint
 - [x] Human-approved outreach drafts
-- [ ] Duplicate active-opportunity guard
-- [ ] Follow-up queue and proposal versioning
+- [x] Duplicate active-opportunity guard
+- [x] Follow-up queue and proposal versioning
 
 ## Phase 3 — Project operations
 - [x] Delivery task checklist
