@@ -2383,3 +2383,53 @@ def update_automation_schedule(schedule_id: str, payload: dict):
             if not row:
                 raise HTTPException(status_code=404, detail="Schedule not found")
             return row
+
+
+@app.post("/portal/project/{project_id}/approve")
+def portal_approve(project_id: str, token: str, payload: dict | None = None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, client_id FROM client_portal_access
+                   WHERE project_id=%s AND token_hash=%s AND status='active'
+                     AND (expires_at IS NULL OR expires_at > now())""",
+                (project_id, hash_token(token)),
+            )
+            access = cur.fetchone()
+            if not access:
+                raise HTTPException(status_code=401, detail="Invalid or expired portal token")
+            cur.execute(
+                """INSERT INTO approval_history
+                   (project_id, entity_type, entity_id, approval_type, decision, actor_type, notes)
+                   VALUES (%s,'project','%s','launch','approved','client',%s) RETURNING *""",
+                (project_id, project_id, (payload or {}).get("notes")),
+            )
+            approval = cur.fetchone()
+            cur.execute("UPDATE client_portal_access SET last_used_at=now() WHERE id=%s", (access["id"],))
+            return {"approval": approval, "message": "Client approval recorded. Production actions remain subject to Luma launch gates."}
+
+@app.post("/portal/project/{project_id}/revision")
+def portal_revision(project_id: str, token: str, payload: dict):
+    if not payload.get("summary"):
+        raise HTTPException(status_code=400, detail="summary is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT id, client_id FROM client_portal_access
+                   WHERE project_id=%s AND token_hash=%s AND status='active'
+                     AND (expires_at IS NULL OR expires_at > now())""",
+                (project_id, hash_token(token)),
+            )
+            access = cur.fetchone()
+            if not access:
+                raise HTTPException(status_code=401, detail="Invalid or expired portal token")
+            cur.execute(
+                """INSERT INTO revision_requests
+                   (project_id, implementation_id, requested_by, summary, details, priority)
+                   VALUES (%s,%s,'client',%s,%s,%s) RETURNING *""",
+                (project_id, payload.get("implementation_id"), payload["summary"],
+                 payload.get("details"), payload.get("priority", "normal")),
+            )
+            revision = cur.fetchone()
+            cur.execute("UPDATE client_portal_access SET last_used_at=now() WHERE id=%s", (access["id"],))
+            return revision
