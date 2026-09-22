@@ -19,6 +19,7 @@ from revenue import revenue_summary, service_performance
 from workflows import workflow_definition, next_step
 from integrations import providers
 from security import authorized
+from portal import create_token, hash_token
 
 app = FastAPI(title="Luma API", version="0.7.0")
 
@@ -326,6 +327,115 @@ def create_integration(payload: dict):
                 ),
             )
             return cur.fetchone()
+
+
+@app.post("/portal/access")
+def create_portal_access(payload: dict):
+    if not payload.get("client_id"):
+        raise HTTPException(status_code=400, detail="client_id is required")
+    raw, token_hash = create_token()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO client_portal_access (client_id, project_id, token_hash, expires_at)
+                   VALUES (%s,%s,%s,%s) RETURNING id, client_id, project_id, status, expires_at, created_at""",
+                (payload["client_id"], payload.get("project_id"), token_hash, payload.get("expires_at")),
+            )
+            access = cur.fetchone()
+    return {"access": access, "token": raw}
+
+
+@app.get("/portal/project/{project_id}")
+def portal_project(project_id: str, token: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT a.id, a.client_id
+                   FROM client_portal_access a
+                   WHERE a.project_id=%s AND a.token_hash=%s AND a.status='active'
+                     AND (a.expires_at IS NULL OR a.expires_at > now())""",
+                (project_id, hash_token(token)),
+            )
+            access = cur.fetchone()
+            if not access:
+                raise HTTPException(status_code=401, detail="Invalid or expired portal token")
+            cur.execute(
+                """SELECT p.id, p.name, p.status, p.agreed_price, p.recurring_price,
+                          p.start_date, p.target_date, b.name AS business_name,
+                          s.name AS service_name
+                   FROM projects p
+                   JOIN clients c ON c.id=p.client_id
+                   JOIN businesses b ON b.id=c.business_id
+                   LEFT JOIN services s ON s.id=p.service_id
+                   WHERE p.id=%s AND p.client_id=%s""",
+                (project_id, access["client_id"]),
+            )
+            project = cur.fetchone()
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            cur.execute("SELECT * FROM project_milestones WHERE project_id=%s ORDER BY sequence", (project_id,))
+            milestones = cur.fetchall()
+            cur.execute(
+                "UPDATE client_portal_access SET last_used_at=now() WHERE id=%s",
+                (access["id"],),
+            )
+            return {"project": project, "milestones": milestones}
+
+
+@app.get("/billing")
+def list_billing(status: str | None = None, limit: int = 100):
+    limit = max(1, min(limit, 500))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if status:
+                cur.execute("SELECT * FROM billing_records WHERE status=%s ORDER BY created_at DESC LIMIT %s", (status, limit))
+            else:
+                cur.execute("SELECT * FROM billing_records ORDER BY created_at DESC LIMIT %s", (limit,))
+            return cur.fetchall()
+
+
+@app.post("/billing")
+def create_billing(payload: dict):
+    if payload.get("amount") is None:
+        raise HTTPException(status_code=400, detail="amount is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO billing_records
+                   (client_id, project_id, proposal_id, external_invoice_id, status,
+                    amount, currency, due_at, metadata)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                   RETURNING *""",
+                (
+                    payload.get("client_id"), payload.get("project_id"), payload.get("proposal_id"),
+                    payload.get("external_invoice_id"), payload.get("status", "draft"),
+                    payload["amount"], payload.get("currency", "USD"), payload.get("due_at"),
+                    json.dumps(payload.get("metadata") or {}),
+                ),
+            )
+            return cur.fetchone()
+
+
+@app.post("/billing/{billing_id}/paid")
+def mark_billing_paid(billing_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE billing_records SET status='paid', paid_at=now() WHERE id=%s RETURNING *",
+                (billing_id,),
+            )
+            record = cur.fetchone()
+            if not record:
+                raise HTTPException(status_code=404, detail="Billing record not found")
+            cur.execute(
+                """INSERT INTO revenue_transactions
+                   (client_id, project_id, amount, status, transaction_type, metadata)
+                   VALUES (%s,%s,%s,'paid','payment',%s::jsonb)
+                   RETURNING *""",
+                (record["client_id"], record["project_id"], record["amount"],
+                 json.dumps({"billing_id": str(billing_id)})),
+            )
+            return {"billing": record, "revenue": cur.fetchone()}
 
 
 @app.get("/dashboard")
