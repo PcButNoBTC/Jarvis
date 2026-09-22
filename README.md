@@ -1,153 +1,271 @@
 # Luma
 
-Self-hosted AI business operating system for finding opportunities, preparing sales, winning work, and helping deliver it.
+**Only recommend what you observed.**
 
-## V1
+<p align="center">
+  <img src="apps/web/public/icon.svg" alt="Luma icon" width="88" height="88" />
+</p>
 
-Luma V1 is built around a simple loop:
+**Luma** is a self-hosted AI business operating system for finding local opportunities, preparing sales, winning work, and delivering it — without spray-and-pray outreach or generic “AI” pitches.
 
-**Discover → Research → Qualify → Sell → Deliver → Follow up → Measure revenue**
+The GitHub repository remains **Jarvis** for continuity. The product name is **Luma**.
 
-### Stack
-- PostgreSQL
-- FastAPI
-- Next.js
-- Python worker
-- Provider-neutral AI gateway
-- Docker Compose
+---
 
-### Repository layout
+## Why Luma is different
+
+| Typical AI agency tool | Luma |
+|------------------------|------|
+| Generic “we do AI” outreach | Opens with **observed** site signals in plain English |
+| One product forced on every lead | **Service-specific** opportunities (Website, Lead Capture, Receptionist, …) |
+| Auto-send sequences | **Human approval** before any external message |
+| Feature dump proposals | **One-page client brief** prospects can understand |
+| Black-box scoring | Transparent **heuristic factors** tied to evidence |
+
+---
+
+## Capabilities at a glance
+
+### 1. Discover and ingest prospects
+- Manual business create
+- Prospect ingest with source metadata
+- CSV import path
+- Deduplication by external ID, email, domain, or name
+- Research job queue with worker polling
+
+### 2. Website research (evidence-first)
+Automated analysis collects **only observable signals**:
+- HTTP status, HTTPS, response time
+- Mobile viewport
+- Contact form, phone link, email link, clear CTA
+- CMS detection (WordPress, Wix, Squarespace, Shopify, Webflow)
+
+No invented business problems. No assumed need for automation.
+
+### 3. Service-specific qualification
+Raw signals map to your catalog — not a single “AI Website” bucket:
+
+| Service | Typical signal drivers |
+|---------|------------------------|
+| **AI Website** | Site errors, no HTTPS, no mobile viewport, slow load |
+| **Lead Capture System** | No form, no CTA, no email path |
+| **AI Receptionist** | No phone link, weak inbound contact surface |
+| **Appointment Automation** | Weak booking / CTA signals |
+| **Review Automation** | Supported with industry bias |
+| **Video Walkthrough** | Boosted for real estate / property niches |
+| **Custom Automation** | Multi-signal residual cases |
+
+Optional **industry bias** (dental, HVAC, contractor, restaurant, legal, …) gently boosts the services that fit that vertical.
+
+### 4. Pipeline and sales cockpit
+- Opportunities with score, evidence, service link, value range
+- **Call prep** — service-specific openings, discovery questions, objection handling
+- **Client brief** — shareable one-pager (what we noticed, why it matters, recommendation, investment, how we work)
+- **Outreach sequence** — Day 1 / 3 / 7 drafts, low-pressure, human-approved only
+- **Offers and proposals** — concrete deliverables, assumptions, exclusions per service
+- Proposal status: draft → sent → accepted / rejected / expired
+
+### 5. Delivery
+- Accepting a proposal can activate client + project + checklist
+- Projects, tasks, activities
+- Dashboard for pipeline value, won revenue, queues
+
+### 6. Operating principles (product constraints)
+- Start free/cheap; spend only when tied to revenue or quality
+- Never commit secrets to Git
+- **No auto-send** of outreach
+- Evidence-first research only
+
+---
+
+## Stack
+
+| Layer | Technology |
+|-------|------------|
+| API | FastAPI (Python) |
+| Dashboard | Next.js 14 |
+| Worker | Python (research queue) |
+| Database | PostgreSQL |
+| Runtime | Docker Compose |
+| AI | Provider-neutral gateway (optional; core loop works on heuristics) |
+
+---
+
+## Repository layout
 
 ```
-apps/api        FastAPI API
-apps/web        Next.js dashboard
-apps/worker     scheduled/background jobs
-database        PostgreSQL schema and seeds
-packages        shared domain/AI modules
-prompts         versioned agent prompts
-infrastructure  deployment helpers
-tests            automated tests
+apps/api          FastAPI API, qualification, sales, website analyzer
+apps/web          Next.js dashboard (+ public/icon.svg)
+apps/worker       Background research job runner
+database          PostgreSQL schema + service seeds
+packages/leads    Lead source helpers
+prompts           Versioned agent prompt templates
+.github/workflows CI (compile + qualification tests)
 ```
+
+---
 
 ## Quick start
 
-1. Copy `.env.example` to `.env`.
-2. Set strong database credentials.
-3. Start services:
-
 ```bash
+cp .env.example .env
+# Set strong Postgres credentials in .env
+
 docker compose up --build
 ```
 
-4. API health: `/health`
-5. Dashboard: `http://localhost:3000`
+| Surface | URL |
+|---------|-----|
+| API health | `http://localhost:8000/health` |
+| API root | `http://localhost:8000/` |
+| Dashboard | `http://localhost:3000` |
 
-## Operating principle
+---
 
-Start free/cheap. Spend more only when an expense can be tied to revenue, delivery quality, or a measurable reduction in manual work.
+## Core API map
 
-Never put API keys, passwords, private keys, or customer secrets in Git.
+### Prospects and research
 
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/businesses` | Add prospect |
+| `GET` | `/businesses` | List prospects |
+| `POST` | `/prospects/ingest` | Ingest / dedupe prospect |
+| `POST` | `/businesses/{id}/research` | Enqueue website research |
+| `GET` | `/research/jobs` | Inspect research queue |
+| `POST` | `/research/jobs/{id}/run` | Run one research job |
+| `POST` | `/analyze-website` | Analyze URL only |
+| `POST` | `/businesses/{id}/analyze` | Analyze + create opportunities |
+| `POST` | `/qualify` | Score analysis (optional `industry`) |
 
-## V1.1 API
+### Opportunities and sales
 
-The first money-making primitives now include:
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/opportunities` | List opportunities |
+| `GET` | `/opportunities/{id}` | Detail + activities |
+| `POST` | `/opportunities/{id}/prepare-call` | Call prep pack |
+| `POST` | `/opportunities/{id}/client-brief` | Shareable client one-pager |
+| `POST` | `/opportunities/{id}/create-offer` | Scoped offer |
+| `POST` | `/proposals` | Proposal draft |
+| `PATCH` | `/proposals/{id}/status` | Move proposal status |
 
-- `POST /businesses` — add a prospect.
-- `GET /businesses` — list prospects.
-- `POST /analyze-website` — collect conservative, observable website signals.
-- `POST /qualify` — score an analysis with transparent evidence-based heuristics.
-- `GET /dashboard` — pipeline counts.
+### Outreach (human-gated)
 
-Website analysis is intentionally evidence-first. It does not invent business problems or assume that automation is needed. Outbound actions remain human-approved.
+| Method | Path | Purpose |
+|--------|------|---------|
+| `POST` | `/outreach/drafts?opportunity_id=` | Day 1/3/7 **draft** emails |
+| `GET` | `/outreach/drafts` | Review drafts |
+| `PATCH` | `/outreach/drafts/{id}` | Edit / approve / reject |
 
-CI runs Python compilation checks and qualification tests on pushes and pull requests.
+### Delivery and ops
 
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/dashboard` | Counts + queues |
+| `GET` | `/projects/{id}` | Project detail |
+| `POST` | `/projects/{id}/start` | Start delivery |
+| `PATCH` | `/tasks/{id}/status` | Update task |
 
-## V1.2 Sales + delivery cockpit
+---
 
-Sales workflow endpoints:
+## Recommended revenue workflow
 
-- `GET /opportunities` — review qualified opportunities.
-- `GET /opportunities/{id}` — inspect evidence and activity.
-- `POST /opportunities/{id}/prepare-call` — create evidence-based call prep.
-- `POST /opportunities/{id}/create-offer` — turn an opportunity into a scoped offer.
-- `POST /proposals` — create a proposal draft.
-- `PATCH /proposals/{id}/status` — move a proposal through draft/sent/accepted/rejected/expired.
+1. **Ingest** a local business (with `industry` when known).
+2. **Research** the website → multiple service opportunities with scores.
+3. Open the top opportunity → **Client brief** → share with the owner.
+4. Or **Draft outreach** → approve Day 1 only when the tone is right.
+5. **Call prep** before the conversation.
+6. **Create offer** with concrete deliverables → proposal → accept → project.
 
-Delivery workflow:
+Nothing external is sent until a human approves it.
 
-- Accepting a proposal automatically creates or activates the client, creates a project, creates an initial delivery checklist, and marks the opportunity won.
-- `GET /projects/{id}` — inspect the project and tasks.
-- `POST /projects/{id}/start` — start delivery and optionally set dates.
+---
 
-The proposal and call-prep generators are deterministic templates for now. This keeps the core business loop usable without requiring a paid AI provider; stronger model-based generation can be added behind the provider-neutral AI layer later.
+## Seeded services (catalog)
 
-Outbound communication is still not automatically sent. Human approval remains the gate before external communication.
+| Service | Typical setup range | Delivery days |
+|---------|---------------------|---------------|
+| AI Website | $750–$3,000 | 7 |
+| AI Receptionist | $750–$2,500 | 7 |
+| Lead Capture System | $500–$2,000 | 5 |
+| Appointment Automation | $500–$2,000 | 5 |
+| Review Automation | $250–$1,000 | 3 |
+| Video Walkthrough | $250–$1,500 | 5 |
+| Custom Automation | $750–$5,000 | 14 |
 
-## Naming
+Ranges are defaults in `database/schema.sql` and can be overridden per offer.
 
-The AI operator is named **Luma**. The GitHub repository remains **Jarvis** for continuity with the existing project infrastructure.
+---
 
+## Version history (product)
 
-## V1.3 Discovery + research queue
+| Version | Focus |
+|---------|--------|
+| **V1** | Discover → research → qualify → sell → deliver loop |
+| **V1.1** | Website analyze + qualify primitives |
+| **V1.2** | Sales + delivery cockpit |
+| **V1.3** | Discovery + research queue |
+| **V1.4** | Multi-service opportunity mapping |
+| **V1.5** | Industry bias + service-aware call prep |
+| **V1.6** | Revenue outreach sequences + offer scopes |
+| **V1.7** | Client brief, warmer copy, client-friendly dashboard |
+| **V1.8** | Project icon, full capabilities README, branding polish |
 
-Luma now has a controlled discovery foundation:
+---
 
-- `POST /prospects/ingest` — ingest or update a prospect with source metadata.
-- `POST /businesses/{id}/research` — enqueue website research.
-- `GET /research/jobs` — inspect the research queue.
-- `POST /research/jobs/{id}/run` — execute one research job.
-- The worker polls the queue and asks the API to run research.
-- `POST /outreach/drafts` — create an evidence-based outbound draft.
-- `GET /outreach/drafts` — review drafts awaiting human approval.
+## Dashboard
 
-Deduplication prefers a source external ID, then email, then normalized website domain, then business name. The system does not auto-send outbound messages. Source adapters should only use data sources whose automation terms and applicable laws permit the intended use.
+The web UI emphasizes:
 
+- Headline: **Only recommend what you observed**
+- Pipeline metrics
+- Opportunity queue with **service badges**
+- One-click **Client brief**, **Draft outreach**, **Call prep**
+- Research queue, outreach drafts (approval required), projects, tasks
 
-## V1.4 Service-specific opportunities
+Icon: `apps/web/public/icon.svg` (indigo mark — light + path forward).
 
-Raw website signals are no longer collapsed into a single “AI Website” opportunity.
+---
 
-`map_to_service_opportunities()` maps observed factors to the existing service catalog:
+## Development and tests
 
-| Signal family              | Primary services                          |
-|----------------------------|-------------------------------------------|
-| Site errors / HTTPS / mobile / slow load | AI Website, Custom Automation    |
-| Missing contact form / CTA / email     | Lead Capture System, Appointment Automation |
-| Missing phone link                   | AI Receptionist, Appointment Automation   |
-| Multi-signal residual                | Custom Automation                       |
+```bash
+# API unit tests
+cd apps/api
+python -m pytest test_qualification.py test_sales.py -q
 
-Research jobs and `POST /businesses/{id}/analyze` now create **one opportunity per qualifying service**, each with its own score, evidence factors, title, and linked `service_id`.
+# Syntax check
+python -m py_compile main.py qualification.py sales.py website_analyzer.py
+```
 
-`POST /qualify` without `service_name` returns the full list of service-specific opportunities plus an aggregate score. With `service_name` it remains a single weighted score for backward compatibility.
+CI runs Python compile checks and qualification tests on push/PR.
 
-Prompt version for automated research is now `website-analysis-v2`.
+---
 
+## Security and compliance notes
 
-## V1.5 Industry bias + service-aware sales
+- Do not store API keys, passwords, or customer secrets in Git.
+- Use `.env` (see `.env.example`).
+- Outreach is **draft-only** until approved — reduce spam and legal risk.
+- Source adapters should only use data sources whose terms and applicable laws allow the intended use.
+- Website analysis uses a polite User-Agent and short timeouts.
 
-- Optional `industry` on a business boosts relevant services (e.g. dental → Appointment Automation + AI Receptionist; contractor → Lead Capture; restaurant → Review Automation).
-- Research and analyze paths pass `business.industry` into the mapper.
-- `POST /qualify` accepts `industry` when returning the full opportunity list.
-- Call-prep generators use service-specific openings and discovery questions.
-- Dashboard opportunity queue shows a clear service badge per opportunity.
+---
 
+## License and naming
 
-## V1.6 Revenue outreach + offer scope
+- Product: **Luma**
+- Repository: **Jarvis** (`PcButNoBTC/Jarvis`)
+- License: see repository settings / `LICENSE` if present
 
-Upgrades aimed only at booking meetings and closing offers:
+---
 
-- `POST /outreach/drafts` builds a **Day 1 / 3 / 7** email sequence from opportunity evidence (plain-English observations, service outcome, industry hook). All messages stay **draft** until human approval.
-- Service-specific default offer deliverables, assumptions, and exclusions so proposals are concrete and easier to accept.
-- No auto-send. Human gate remains the control point before any external message.
+## What “done” looks like for a client
 
+1. They receive a **short brief** about their own public site — not a feature list.
+2. They understand **one recommended service** and a **price range**.
+3. They approve scope before work.
+4. Delivery is tracked as a project with clear tasks.
 
-## V1.7 Client-friendly experience
-
-Positioning and product changes so prospects *want* to work with you:
-
-- **Client brief** — `POST /opportunities/{id}/client-brief` produces a one-page, plain-English summary (what we noticed, why it matters, recommendation, price range, how we work). Shareable with the prospect.
-- **Warmer outreach** — Day 1/3/7 copy is collaborative, low-pressure, and explicit about not chasing.
-- **Dashboard** — Clear headline (“Only recommend what you observed”), one-click Client brief / Draft outreach / Call prep on each opportunity, human-approval callouts.
-- Nothing auto-sends. Clients see evidence and scope before they commit.
+That is the product promise: **evidence, clarity, human control**.

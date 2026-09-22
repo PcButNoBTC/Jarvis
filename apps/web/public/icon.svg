@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Luma">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square mark -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#g)"/>
+  <!-- Soft inner glow disk -->
+  <circle cx="64" cy="52" r="22" fill="#c7d2fe" opacity="0.95"/>
+  <circle cx="64" cy="52" r="12" fill="#ffffff"/>
+  <!-- Simple L stem / path suggesting light and path forward -->
+  <path d="M40 88 V48 h12 v28 h28 v12 Z" fill="#ffffff" opacity="0.92"/>
+</svg>

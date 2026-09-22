@@ -134,15 +134,24 @@ export default function Home() {
         <div>
           <div
             style={{
-              fontSize: 13,
-              fontWeight: 600,
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-              color: "#6366f1",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
               marginBottom: 6,
             }}
           >
-            Luma
+            <img src="/icon.svg" alt="Luma" width={28} height={28} style={{borderRadius: 8}} />
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: "#6366f1",
+              }}
+            >
+              Luma
+            </span>
           </div>
           <h1 style={{ margin: "0 0 8px", fontSize: 28, fontWeight: 700 }}>
             Only recommend what you observed

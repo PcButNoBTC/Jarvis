@@ -11,7 +11,7 @@ from db import get_conn
 from qualification import score_opportunity, map_to_service_opportunities
 from website_analyzer import analyze_website
 
-app = FastAPI(title="Luma API", version="0.3.0")
+app = FastAPI(title="Luma API", version="0.4.0")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
@@ -58,7 +58,7 @@ class OutreachDraftUpdate(BaseModel):
 
 @app.get("/")
 def root():
-    return {"name": "Luma", "version": "0.3.0", "status": "running"}
+    return {"name": "Luma", "version": "0.4.0", "status": "running"}
 
 
 @app.get("/health")
