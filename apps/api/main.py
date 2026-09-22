@@ -1,4 +1,5 @@
 import os
+import json
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, HttpUrl
 import psycopg
@@ -105,6 +106,85 @@ def list_businesses(limit: int = 50):
 @app.post("/analyze-website")
 def analyze(payload: WebsiteAnalyzeRequest):
     return analyze_website(str(payload.url))
+
+
+
+@app.post("/businesses/{business_id}/analyze")
+def analyze_business(business_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM businesses WHERE id = %s", (business_id,))
+            business = cur.fetchone()
+            if not business:
+                raise HTTPException(status_code=404, detail="Business not found")
+            if not business["website_url"]:
+                raise HTTPException(status_code=400, detail="Business has no website URL")
+
+    analysis = analyze_website(business["website_url"])
+    qualification = score_opportunity(analysis, "AI Website")
+    evidence = qualification["factors"]
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO websites
+                   (business_id, url, http_status, https_enabled, mobile_friendly,
+                    load_time_ms, cms, technology_stack, last_checked_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, '[]'::jsonb, now())
+                   RETURNING id""",
+                (
+                    business_id, analysis["url"], analysis["http_status"],
+                    analysis["https"], analysis["has_mobile_viewport"],
+                    analysis["response_time_ms"], analysis["cms"],
+                ),
+            )
+            website_id = cur.fetchone()["id"]
+
+            cur.execute(
+                """INSERT INTO research_reports
+                   (business_id, summary, observed_problems, opportunities, evidence,
+                    model, prompt_version)
+                   VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s)
+                   RETURNING id""",
+                (
+                    business_id,
+                    "Automated website research based only on observed technical signals.",
+                    json.dumps(evidence),
+                    json.dumps([{"service": "AI Website", "score": qualification["score"]}]),
+                    json.dumps(analysis),
+                    "heuristic",
+                    "website-analysis-v1",
+                ),
+            )
+            report_id = cur.fetchone()["id"]
+
+            cur.execute(
+                """INSERT INTO opportunities
+                   (business_id, research_report_id, title, description,
+                    problem_evidence, score, estimated_value_min,
+                    estimated_value_max, status, next_action)
+                   SELECT %s, %s, %s, %s, %s::jsonb, %s, price_min, price_max,
+                          'new', 'Review evidence and approve outreach'
+                   FROM services WHERE name = 'AI Website'
+                   RETURNING id""",
+                (
+                    business_id, report_id,
+                    "Website improvement opportunity",
+                    "Observed website signals that may justify a website improvement conversation.",
+                    json.dumps(evidence),
+                    qualification["score"],
+                ),
+            )
+            opportunity = cur.fetchone()
+
+    return {
+        "business_id": business_id,
+        "website_id": website_id,
+        "research_report_id": report_id,
+        "opportunity_id": opportunity["id"] if opportunity else None,
+        "analysis": analysis,
+        "qualification": qualification,
+    }
 
 
 @app.post("/qualify")
