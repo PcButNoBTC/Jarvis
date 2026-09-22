@@ -12,6 +12,7 @@ from db import get_conn, ensure_delivery_schema
 from qualification import score_opportunity, map_to_service_opportunities
 from website_analyzer import analyze_website
 from delivery import generate_project, validate_project, package_project, deploy_static, check_live_url
+from project_options import option_definitions, validate_options, option_summary
 
 app = FastAPI(title="Luma API", version="0.6.0")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -97,33 +98,44 @@ def get_project_options(project_id: str):
     with get_conn() as conn:
         with conn.cursor() as cur:
             project, _ = _delivery_project(cur, project_id)
-            cur.execute("SELECT settings FROM launch_settings WHERE project_id=%s", (project_id,))
-            row = cur.fetchone()
-            saved = row["settings"] if row else {}
             service = project.get("service_name")
-            options = {
-                "hosting": ["client_hosting", "cloudflare_pages", "vercel", "netlify", "self_hosted", "custom"] if service == "AI Website" else [],
-                "communication": ["email", "phone", "client_managed"],
-                "analytics": ["none", "plausible", "google_analytics", "custom"],
-                "handoff": ["digital_package", "client_walkthrough", "live_activation"],
-            }
-            return {"project_id": project_id, "service": service, "options": options, "selected": saved}
+            definitions = option_definitions(service)
+            cur.execute("SELECT options FROM project_options WHERE project_id=%s", (project_id,))
+            row = cur.fetchone()
+            selected = row["options"] if row else {}
+            return {"project_id": project_id, "service": service, "options": definitions, "selected": selected,
+                    "validation": {"missing": validate_options(service, selected), "complete": not validate_options(service, selected)}}
 
 @app.post("/projects/{project_id}/options")
 def save_project_options(project_id: str, payload: ProjectOptionUpdate):
-    allowed = {"hosting_option", "communication", "analytics", "handoff", "provider_selected", "delivery_destination"}
-    options = {str(k): v for k, v in payload.options.items() if k in allowed}
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT settings FROM launch_settings WHERE project_id=%s", (project_id,))
+            project, _ = _delivery_project(cur, project_id)
+            service = project.get("service_name")
+            definitions = option_definitions(service)
+            allowed = {x["key"] for x in definitions}
+            options = {str(k): v for k, v in payload.options.items() if k in allowed}
+            cur.execute("SELECT options FROM project_options WHERE project_id=%s", (project_id,))
             row = cur.fetchone()
-            current = row["settings"] if row else {}
+            current = row["options"] if row else {}
             current.update(options)
-            cur.execute("""INSERT INTO launch_settings (project_id, settings, ready, updated_at)
-                           VALUES (%s, %s::jsonb, false, now())
-                           ON CONFLICT (project_id) DO UPDATE SET settings=EXCLUDED.settings, updated_at=now()
-                           RETURNING settings""", (project_id, json.dumps(current)))
-            return {"project_id": project_id, "options": cur.fetchone()["settings"]}
+            cur.execute("""INSERT INTO project_options (project_id, options, updated_at)
+                           VALUES (%s, %s::jsonb, now())
+                           ON CONFLICT (project_id) DO UPDATE SET options=EXCLUDED.options, updated_at=now()
+                           RETURNING options""", (project_id, json.dumps(current)))
+            selected = cur.fetchone()["options"]
+            missing = validate_options(service, selected)
+            return {"project_id": project_id, "service": service, "options": definitions, "selected": selected,
+                    "validation": {"missing": missing, "complete": not missing},
+                    "summary": option_summary(service, selected)}
+
+@app.get("/projects/{project_id}/configuration")
+def get_project_configuration(project_id: str):
+    return get_project_options(project_id)
+
+@app.post("/projects/{project_id}/configuration")
+def save_project_configuration(project_id: str, payload: ProjectOptionUpdate):
+    return save_project_options(project_id, payload)
 
 @app.get("/dashboard")
 def dashboard():
