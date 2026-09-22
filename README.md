@@ -299,3 +299,139 @@ Projects now include a launch-readiness workflow. Before Luma will deploy an AI 
 The dashboard exposes these requirements in the optional **Client Launch Center** module. Launch Center is one delivery option among the broader Luma project workflow, not a replacement for it. The available launch path and required fields change by service. It provides selectable hosting/deployment options plus optional resource suggestions for hosting, DNS, forms, and analytics. The generated delivery package also includes `CLIENT-LAUNCH.md`.
 
 Luma never fabricates third-party credentials or creates external accounts on the client's behalf. External providers remain explicit client-controlled dependencies.
+
+
+---
+
+# Current Luma Architecture and Operating Guide
+
+Luma is the self-hosted business operating system behind this repository. The GitHub repository remains named Jarvis for continuity; the product is Luma.
+
+## End-to-end operating loop
+
+Discover → Research → Qualify → Sell → Deliver → Launch/Handoff → Follow up → Measure revenue.
+
+The product is intentionally broader than the Client Launch Center. The dashboard is organized around multiple operating areas: Discover/Research, Opportunities, Sales/Proposals, Projects, Build/Delivery, Client Launch Center, Handoff, Analytics/Revenue, and Settings.
+
+## Core architecture
+
+- Next.js web dashboard in apps/web
+- FastAPI orchestration/API in apps/api
+- PostgreSQL system of record in database/schema.sql
+- Background research worker in apps/worker
+- Lead/source adapters in packages/leads
+- Service-specific sales helpers in apps/api/sales.py
+- Evidence-based qualification in apps/api/qualification.py
+- Website observation in apps/api/website_analyzer.py
+- Delivery generation/validation/packaging in apps/api/delivery.py
+- Prompt instructions in prompts/
+- Docker Compose for local/self-hosted operation
+- GitHub Actions for Python checks and tests
+
+## Commercial workflow
+
+1. Ingest a prospect.
+2. Deduplicate it using source ID, email, domain, or name.
+3. Queue research.
+4. Analyze observable website signals.
+5. Produce evidence-backed, service-specific opportunities.
+6. Prepare call notes, client brief, offer, proposal, and outreach drafts.
+7. Keep outbound communication human-approved.
+8. Accept a proposal and create the client/project/implementation records.
+9. Capture approved requirements.
+10. Generate and validate the delivery package.
+11. Select an appropriate launch or activation path.
+12. Require approval before production deployment.
+13. Monitor supported production URLs.
+14. Package the handoff and retain the project history.
+
+## Evidence-first qualification
+
+Luma observes signals such as HTTP status, HTTPS, response time, mobile viewport, contact form, phone link, email link, CTA, and common CMS indicators. These observations are kept separate from hypotheses about business impact.
+
+Service mapping is not a single AI Website bucket. Current services are AI Website, AI Receptionist, Lead Capture System, Appointment Automation, Review Automation, Video Walkthrough, and Custom Automation. Industry context can provide a modest bias, but industry alone should not manufacture a problem.
+
+## Sales system
+
+Sales helpers produce service-specific openings, discovery questions, objection handling, client briefs, outreach sequences, offer scopes, and proposals. Offers carry setup/recurring pricing, deliverables, assumptions, and exclusions. Proposal acceptance is guarded against invalid state transitions.
+
+Outbound sending is not automatically performed. The intended workflow is draft → human review → approval.
+
+## Delivery system
+
+Proposal acceptance creates a client, project, implementation record, and initial tasks for requirements, generation, QA, client review, deployment/activation, and handoff.
+
+The V1 delivery engine has blueprints for all current services. AI Website projects generate a real static-site package containing the site plus deployment/handoff documentation. Workflow/content services generate implementation or activation packages with explicit dependencies and testing instructions.
+
+Generated projects can be validated, packaged as ZIP files, and tracked through implementation, artifacts, deployment runs, launch settings, and handoff records.
+
+Luma can deploy supported static sites only to the configured LUMA_DEPLOY_ROOT. It does not fabricate credentials, domain ownership, DNS access, phone numbers, calendar accounts, CRM access, or third-party SaaS accounts.
+
+## Client Launch Center is modular
+
+Client Launch Center is one option inside the broader Luma system, not the whole product.
+
+It currently supports selectable launch paths such as:
+- prepare a package for client launch
+- Luma deploys after approval
+
+Hosting choices include:
+- client's existing hosting
+- Cloudflare Pages
+- Vercel
+- Netlify
+- self-hosted
+- other/custom
+
+Requirements are service-specific. Websites can require domain/content/hosting/DNS/HTTPS details when appropriate. Appointment automation, reception, lead capture, review automation, and custom workflows instead focus on provider selection, credentials/access, workflow approval, and production testing. Video projects focus on approved assets and delivery destination.
+
+The system therefore does not ask every client for DNS access simply because a Launch Center exists.
+
+## Database model
+
+The PostgreSQL schema covers businesses, contacts, websites, research reports, services, opportunities, offers, proposals, clients, projects, tasks, activities, messages, agent runs, research jobs, implementations, delivery artifacts, deployment runs, handoffs, and launch settings.
+
+Operational indexes cover business status, opportunity score/status, activity history, task status/due dates, outreach queues, and research queues. Duplicate pending/running research for a business is guarded by a partial unique index.
+
+## Local deployment
+
+The Docker Compose stack contains PostgreSQL, API, research worker, static preview, and web dashboard.
+
+Typical local endpoints:
+- Dashboard: http://localhost:3000
+- API: http://localhost:8000
+- API health: http://localhost:8000/health
+- Static deployment preview: http://localhost:8080
+
+Important environment variables include DATABASE_URL, API_URL, NEXT_PUBLIC_API_URL, LUMA_DELIVERY_ROOT, LUMA_DEPLOY_ROOT, AI_PROVIDER, AI_MODEL, and AI_API_KEY.
+
+Use a real secret for POSTGRES_PASSWORD in any real deployment and keep provider credentials out of Git.
+
+## Testing and CI
+
+API tests cover qualification, sales, and delivery behavior. Lead tests cover normalization, deduplication, and CSV parsing. GitHub Actions runs Python compilation/tests for the API and lead package and compilation checks for the worker.
+
+Do not treat CI as passing unless the actual GitHub workflow for the relevant commit has completed successfully.
+
+## Delivery truth
+
+Luma currently generates real artifacts and can deploy supported static sites to its configured deployment root. It is not yet a universal autonomous software factory. Third-party provisioning, credentials, DNS ownership, phone/calendar setup, and provider activation still require explicit configuration or client access.
+
+## Operating principles
+
+1. Recommend what was actually observed.
+2. Separate facts from hypotheses.
+3. Prefer evidence over lead volume.
+4. Keep humans in control of consequential outbound and production actions.
+5. Respect source terms, privacy, anti-spam rules, copyright, and applicable laws.
+6. Use cheap/local computation for routine work and stronger models when the value justifies the cost.
+7. Measure revenue generated per Luma operating dollar.
+
+## Next development priorities
+
+- Generalize the project options engine across hosting, forms, CRM, scheduling, phone, email, analytics, payments, integrations, deployment, and handoff.
+- Improve opportunity candidates with evidence, factors, confidence, rationale, estimated value, and next action.
+- Expand research adapters and queue reliability.
+- Strengthen sales follow-up and pipeline transitions.
+- Expand service-specific delivery templates and QA.
+- Add revenue/cost analytics tying model spend and delivery cost to generated revenue.
