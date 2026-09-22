@@ -1307,7 +1307,7 @@ def create_project_handoff(project_id: str):
             cur.execute(
                 """INSERT INTO activities (business_id, project_id, type, subject, content, metadata)
                    VALUES (%s,%s,'handoff_ready','Delivery handoff ready',%s,%s::jsonb)""",
-                (project["client_id"], project_id, "Client delivery package is ready.", json.dumps({"package": str(archive)})),
+                (project["business_id"], project_id, "Client delivery package is ready.", json.dumps({"package": str(archive)})),
             )
             return {"handoff": handoff, "download": f"/projects/{project_id}/download"}
 
