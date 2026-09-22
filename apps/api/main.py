@@ -3,7 +3,8 @@ import json
 import csv
 import io
 from datetime import date
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 import psycopg
@@ -17,8 +18,18 @@ from requirements import compile_requirements
 from revenue import revenue_summary, service_performance
 from workflows import workflow_definition, next_step
 from integrations import providers
+from security import authorized
 
-app = FastAPI(title="Luma API", version="0.6.0")
+app = FastAPI(title="Luma API", version="0.7.0")
+
+
+@app.middleware("http")
+async def api_key_guard(request: Request, call_next):
+    if request.url.path in {"/", "/health"}:
+        return await call_next(request)
+    if not authorized(request.headers.get("X-Luma-Key")):
+        return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+    return await call_next(request)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
