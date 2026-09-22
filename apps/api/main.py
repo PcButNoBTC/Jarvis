@@ -1118,7 +1118,7 @@ def save_project_requirements(project_id: str, payload: ProjectRequirements):
 
 def _delivery_project(cur, project_id: str):
     cur.execute(
-        """SELECT p.*, b.name AS business_name, b.website_url,
+        """SELECT p.*, c.business_id, b.name AS business_name, b.website_url,
                   s.name AS service_name
            FROM projects p
            JOIN clients c ON c.id = p.client_id
