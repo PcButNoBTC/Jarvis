@@ -135,12 +135,14 @@ def dashboard():
                     SELECT p.id, p.name, p.status, p.agreed_price, p.recurring_price,
                            p.start_date, p.target_date,
                            b.name AS business_name,
+                           s.name AS service_name,
                            i.status AS implementation_status,
                            i.validated_at, i.approved_at,
                            h.status AS handoff_status
                     FROM projects p
                     JOIN clients c ON c.id = p.client_id
                     JOIN businesses b ON b.id = c.business_id
+                    LEFT JOIN services s ON s.id = p.service_id
                     LEFT JOIN implementations i ON i.project_id = p.id
                     LEFT JOIN handoffs h ON h.project_id = p.id
                     WHERE p.status NOT IN ('completed', 'cancelled')
@@ -1242,56 +1244,88 @@ def approve_project_delivery(project_id: str, payload: DeliveryApproval):
             return cur.fetchone()
 
 
-LAUNCH_RESOURCES = [
-    {"category": "Hosting", "name": "Cloudflare Pages", "url": "https://pages.cloudflare.com/", "reason": "Good fit for generated static sites; supports direct upload and custom domains."},
-    {"category": "Hosting", "name": "Vercel", "url": "https://vercel.com/", "reason": "Easy deployment for exported web projects and custom domains."},
-    {"category": "Hosting + forms", "name": "Netlify", "url": "https://www.netlify.com/", "reason": "Static hosting plus built-in form handling for simple lead/contact sites."},
-    {"category": "DNS", "name": "Cloudflare DNS", "url": "https://www.cloudflare.com/dns/", "reason": "Useful when the client needs DNS control, HTTPS, and domain routing."},
-    {"category": "Forms", "name": "Netlify Forms", "url": "https://docs.netlify.com/manage/forms/setup/", "reason": "Useful for simple static contact forms without building a separate backend."},
-    {"category": "Analytics", "name": "Plausible Analytics", "url": "https://plausible.io/", "reason": "Lightweight website analytics option when the client wants simple traffic measurement."},
+LAUNCH_OPTIONS = [
+    {"key": "client_hosting", "name": "Use client's existing hosting", "category": "Hosting", "description": "Deploy to the client's current web host after access and DNS are confirmed."},
+    {"key": "cloudflare_pages", "name": "Cloudflare Pages", "category": "Hosting", "description": "Suggested managed static hosting option for generated websites."},
+    {"key": "vercel", "name": "Vercel", "category": "Hosting", "description": "Suggested managed hosting option for web projects that fit its deployment model."},
+    {"key": "netlify", "name": "Netlify", "category": "Hosting", "description": "Suggested managed static hosting option with optional form handling."},
+    {"key": "self_hosted", "name": "Self-hosted", "category": "Hosting", "description": "Use the client's VPS/server and configure its web root, DNS, and HTTPS."},
+    {"key": "custom", "name": "Other / custom", "category": "Hosting", "description": "Record a custom provider or deployment target."},
 ]
 
+LAUNCH_RESOURCES = [
+    {"category": "Hosting", "name": "Cloudflare Pages", "url": "https://pages.cloudflare.com/", "reason": "Managed hosting option for generated static sites."},
+    {"category": "Hosting", "name": "Vercel", "url": "https://vercel.com/", "reason": "Managed deployment option for supported web projects."},
+    {"category": "Hosting", "name": "Netlify", "url": "https://www.netlify.com/", "reason": "Static hosting with optional form handling."},
+    {"category": "DNS", "name": "Cloudflare DNS", "url": "https://www.cloudflare.com/dns/", "reason": "Useful when the client needs DNS and domain routing."},
+    {"category": "Forms", "name": "Netlify Forms", "url": "https://docs.netlify.com/manage/forms/setup/", "reason": "Optional form handling for compatible static sites."},
+    {"category": "Analytics", "name": "Plausible Analytics", "url": "https://plausible.io/", "reason": "Optional lightweight website analytics."},
+]
 
 def _launch_checklist(project: dict, settings: dict):
     service = project.get("service_name") or "Project"
-    static_site = service == "AI Website"
-    checks = [
-        ("domain", "Production domain", bool(settings.get("domain")), True, "Use the client's domain or an approved production subdomain."),
-        ("hosting_provider", "Hosting / deployment target", bool(settings.get("hosting_provider")), True, "Choose a host or confirm the client's existing web server."),
-        ("hosting_access", "Hosting access confirmed", bool(settings.get("hosting_access")), True, "Luma needs a configured deployment target or the client needs the package and access instructions."),
-        ("dns_access", "DNS access confirmed", bool(settings.get("dns_access")), True, "Someone must be able to point the domain at the approved host."),
-        ("ssl_ready", "HTTPS / SSL confirmed", bool(settings.get("ssl_ready")), True, "Confirm HTTPS is active before calling the site live."),
-        ("content_approved", "Production content/assets approved", bool(settings.get("content_approved")), True, "Client-approved copy, branding, images, and contact details are required."),
-        ("contact_email", "Primary contact email", bool(settings.get("contact_email")), True, "Use the real business inbox that should receive leads or launch notices."),
-    ]
-    if static_site:
-        checks.append(("production_url", "Production URL", bool(settings.get("production_url")), True, "Record the final URL used for the live site and monitoring."))
+    launch_mode = settings.get("launch_mode", "prepare_and_client_launch")
+    hosting = settings.get("hosting_option")
+    checks = []
+
+    if service == "AI Website":
+        checks = [
+            ("content_approved", "Production content/assets approved", bool(settings.get("content_approved")), True, "Client-approved copy, branding, images, and contact details."),
+            ("domain", "Production domain", bool(settings.get("domain")), True, "The client's domain or an approved production subdomain."),
+            ("hosting_option", "Hosting option selected", bool(hosting), True, "Choose an existing host, managed host, self-hosting, or custom target."),
+        ]
+        if launch_mode == "luma_deploy":
+            checks += [
+                ("hosting_access", "Hosting access confirmed", bool(settings.get("hosting_access")), True, "Deployment access or a configured server target is required."),
+                ("dns_access", "DNS access confirmed", bool(settings.get("dns_access")), True, "Someone must be able to route the domain to the approved host."),
+                ("ssl_ready", "HTTPS / SSL confirmed", bool(settings.get("ssl_ready")), True, "HTTPS must be configured before declaring the site live."),
+                ("production_url", "Production URL", bool(settings.get("production_url")), True, "Final URL used for monitoring."),
+            ]
+    elif service in {"Appointment Automation", "AI Receptionist", "Lead Capture System", "Review Automation", "Custom Automation"}:
+        checks = [
+            ("requirements_approved", "Workflow requirements approved", bool(settings.get("requirements_approved")), True, "Client confirms workflow, triggers, destinations, and acceptance criteria."),
+            ("provider_selected", "Automation/provider option selected", bool(settings.get("provider_selected")), True, "Select the client's existing platform or an approved implementation option."),
+            ("credentials_ready", "Required credentials/access confirmed", bool(settings.get("credentials_ready")), True, "Credentials or delegated access must be supplied by the client."),
+            ("test_approved", "Production test approved", bool(settings.get("test_approved")), True, "Client confirms the production test behaved as expected."),
+        ]
+    elif service == "Video Walkthrough":
+        checks = [
+            ("content_approved", "Script/assets approved", bool(settings.get("content_approved")), True, "Client approves the script, branding, and supplied assets."),
+            ("delivery_destination", "Delivery destination selected", bool(settings.get("delivery_destination")), True, "Choose the client's site, storage, video platform, or handoff package."),
+        ]
+    else:
+        checks = [
+            ("requirements_approved", "Requirements approved", bool(settings.get("requirements_approved")), True, "Client confirms the scope and acceptance criteria."),
+            ("delivery_destination", "Delivery destination selected", bool(settings.get("delivery_destination")), True, "Choose deployment, activation, or handoff destination."),
+        ]
+
     return [
         {"key": key, "label": label, "required": required, "complete": complete, "help": help_text}
         for key, label, complete, required, help_text in checks
     ]
 
-
 def _launch_response(project: dict, settings: dict):
     checklist = _launch_checklist(project, settings)
     ready = all(item["complete"] for item in checklist if item["required"])
-    suggestions = LAUNCH_RESOURCES[:]
     return {
         "project_id": str(project["id"]),
         "business_name": project.get("business_name"),
         "service": project.get("service_name"),
         "ready": ready,
+        "launch_options": LAUNCH_OPTIONS,
         "checklist": checklist,
         "settings": settings,
-        "suggestions": suggestions,
-        "note": "Suggestions are optional resources. Luma does not create third-party accounts or fabricate credentials.",
+        "suggestions": LAUNCH_RESOURCES,
+        "note": "Options and suggestions are configurable. Luma does not create third-party accounts or fabricate credentials.",
     }
 
+@app.get("/launch/options")
+def launch_options():
+    return {"options": LAUNCH_OPTIONS}
 
 @app.get("/launch/resources")
 def launch_resources():
     return {"resources": LAUNCH_RESOURCES}
-
 
 @app.get("/projects/{project_id}/launch-readiness")
 def get_launch_readiness(project_id: str):
@@ -1303,13 +1337,13 @@ def get_launch_readiness(project_id: str):
             settings = row["settings"] if row else {}
             return _launch_response(project, settings)
 
-
 @app.post("/projects/{project_id}/launch-settings")
 def save_launch_settings(project_id: str, payload: LaunchSettingsUpdate):
     allowed = {
-        "domain", "hosting_provider", "hosting_access", "dns_access", "ssl_ready",
-        "contact_email", "phone", "production_url", "content_approved",
-        "privacy_url", "terms_url", "analytics"
+        "domain", "hosting_provider", "hosting_option", "launch_mode", "hosting_access", "dns_access",
+        "ssl_ready", "contact_email", "phone", "production_url", "content_approved", "privacy_url",
+        "terms_url", "analytics", "requirements_approved", "provider_selected", "credentials_ready",
+        "test_approved", "delivery_destination"
     }
     settings = {str(k): v for k, v in payload.settings.items() if k in allowed}
     with get_conn() as conn:
@@ -1325,12 +1359,8 @@ def save_launch_settings(project_id: str, payload: LaunchSettingsUpdate):
             )
             saved = cur.fetchone()["settings"]
             result = _launch_response(project, saved)
-            cur.execute(
-                "UPDATE launch_settings SET ready=%s, updated_at=now() WHERE project_id=%s",
-                (result["ready"], project_id),
-            )
+            cur.execute("UPDATE launch_settings SET ready=%s, updated_at=now() WHERE project_id=%s", (result["ready"], project_id))
             return result
-
 
 @app.post("/projects/{project_id}/deploy")
 def deploy_project_delivery(project_id: str):
