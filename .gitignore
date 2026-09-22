@@ -8,3 +8,6 @@ dist/
 build/
 coverage/
 .DS_Store
+
+/data/delivery/
+/data/deploy/
