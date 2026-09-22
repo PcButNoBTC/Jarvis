@@ -40,13 +40,28 @@ async def api_key_guard(request: Request, call_next):
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
+def bootstrap_owner():
+    email=os.getenv("LUMA_ADMIN_EMAIL")
+    password_hash=os.getenv("LUMA_ADMIN_PASSWORD_HASH")
+    if not email or not password_hash:
+        return
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO users(email,password_hash,role) VALUES (%s,%s,'owner')
+                   ON CONFLICT (email) DO NOTHING""",
+                (email.strip().lower(),password_hash),
+            )
+
+
 @app.on_event("startup")
 def startup():
     if DATABASE_URL:
         try:
             ensure_delivery_schema()
+            bootstrap_owner()
         except Exception as exc:
-            print(f"[luma] delivery schema check failed: {type(exc).__name__}: {exc}", flush=True)
+            print(f"[luma] startup initialization failed: {type(exc).__name__}: {exc}", flush=True)
 
 
 
