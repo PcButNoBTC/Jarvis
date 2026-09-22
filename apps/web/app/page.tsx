@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import LaunchCenter from "./launch-center";
+import ProjectConfiguration from "./project-configuration";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -496,6 +497,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <ProjectConfiguration projects={d.active_projects} />
 
       <LaunchCenter projects={d.active_projects} />
 
