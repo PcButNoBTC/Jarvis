@@ -6,7 +6,7 @@ from datetime import date
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl
 import psycopg
 
 from db import get_conn, ensure_delivery_schema
@@ -86,7 +86,7 @@ class OutreachDraftUpdate(BaseModel):
 
 
 class ProjectOptionUpdate(BaseModel):
-    options: dict = {}
+    options: dict = Field(default_factory=dict)
 
 
 
@@ -1412,7 +1412,7 @@ class ProjectStartRequest(BaseModel):
 
 
 class ProjectRequirements(BaseModel):
-    requirements: dict = {}
+    requirements: dict = Field(default_factory=dict)
 
 
 class DeliveryApproval(BaseModel):
@@ -1420,7 +1420,7 @@ class DeliveryApproval(BaseModel):
 
 
 class LaunchSettingsUpdate(BaseModel):
-    settings: dict = {}
+    settings: dict = Field(default_factory=dict)
 
 
 
