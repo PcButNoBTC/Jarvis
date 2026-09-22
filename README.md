@@ -180,6 +180,7 @@ docker compose up --build
 | `POST` | `/projects/{id}/validate` | Run delivery QA |
 | `POST` | `/projects/{id}/approval` | Approve implementation for deployment |
 | `POST` | `/projects/{id}/deploy` | Deploy an approved static site when configured |
+| `POST` | `/projects/{id}/monitor` | Check the production URL after launch |
 | `GET` | `/projects/{id}/artifacts` | List generated artifacts |
 | `GET` | `/projects/{id}/download` | Download client delivery package |
 | `POST` | `/projects/{id}/handoff` | Prepare client handoff |
