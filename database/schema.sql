@@ -99,6 +99,8 @@ CREATE TABLE IF NOT EXISTS offers (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE proposals ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1;
+
 CREATE TABLE IF NOT EXISTS proposals (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   opportunity_id UUID REFERENCES opportunities(id) ON DELETE SET NULL,
@@ -226,6 +228,9 @@ ON CONFLICT (name) DO NOTHING;
 
 CREATE INDEX IF NOT EXISTS idx_businesses_status ON businesses(status);
 CREATE INDEX IF NOT EXISTS idx_opportunities_status_score ON opportunities(status, score DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_opportunity_active ON opportunities(business_id, service_id) WHERE status IN ('new','qualified','contact_pending','contacted','discovery','proposal');
+CREATE UNIQUE INDEX IF NOT EXISTS uq_proposal_opportunity_version ON proposals(opportunity_id, version);
+
 CREATE INDEX IF NOT EXISTS idx_activities_opportunity_created ON activities(opportunity_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tasks_status_due ON tasks(status, due_at);
 CREATE INDEX IF NOT EXISTS idx_messages_outreach_queue ON messages(status, channel, created_at DESC);
