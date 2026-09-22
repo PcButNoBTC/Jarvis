@@ -11,7 +11,7 @@ import psycopg
 from db import get_conn, ensure_delivery_schema
 from qualification import score_opportunity, map_to_service_opportunities
 from website_analyzer import analyze_website
-from delivery import generate_project, validate_project, package_project, deploy_static
+from delivery import generate_project, validate_project, package_project, deploy_static, check_live_url
 
 app = FastAPI(title="Luma API", version="0.4.0")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -1276,6 +1276,28 @@ def deploy_project_delivery(project_id: str):
                     (f"{type(exc).__name__}: {exc}", run["id"]),
                 )
         raise HTTPException(status_code=500, detail=f"Deployment failed: {type(exc).__name__}: {exc}")
+
+
+@app.post("/projects/{project_id}/monitor")
+def monitor_project(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project, implementation = _delivery_project(cur, project_id)
+            url = (implementation.get("requirements") or {}).get("production_url") or project.get("website_url")
+            if not url:
+                raise HTTPException(status_code=400, detail="No production URL configured")
+    try:
+        result = check_live_url(url)
+    except Exception as exc:
+        result = {"url": url, "healthy": False, "error": f"{type(exc).__name__}: {exc}"}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO activities (business_id, project_id, type, subject, content, metadata)
+                   VALUES (%s,%s,'deployment_check','Production deployment check',%s,%s::jsonb)""",
+                (project["business_id"], project_id, json.dumps(result), json.dumps(result)),
+            )
+    return result
 
 
 @app.get("/projects/{project_id}/artifacts")
