@@ -19,6 +19,12 @@ def score_opportunity(analysis: dict, service_name: str | None = None) -> dict:
     if analysis.get("has_phone_link") is False:
         score += 5
         factors.append({"factor": "no_phone_link_observed", "points": 5})
+    if analysis.get("has_cta") is False:
+        score += 10
+        factors.append({"factor": "no_clear_cta_observed", "points": 10})
+    if analysis.get("has_email_link") is False and analysis.get("has_contact_form") is False:
+        score += 5
+        factors.append({"factor": "no_email_or_contact_form_observed", "points": 5})
     if analysis.get("response_time_ms") and analysis["response_time_ms"] > 3000:
         score += 10
         factors.append({"factor": "slow_response_observed", "points": 10})
