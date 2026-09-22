@@ -1687,6 +1687,13 @@ def generate_project_delivery(project_id: str):
             return {"project_id": project_id, "implementation": implementation, "generated": result}
 
 
+@app.get("/projects/{project_id}/qa-plan")
+def project_qa_plan(project_id: str):
+    project, implementation = _delivery_project(project_id)
+    plan = build_plan(project.get("service_name"), implementation.get("requirements") or {})
+    return {"project_id": project_id, "service": project.get("service_name"), "checks": plan["qa_checks"]}
+
+
 @app.post("/projects/{project_id}/validate")
 def validate_project_delivery(project_id: str):
     with get_conn() as conn:
