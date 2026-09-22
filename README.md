@@ -103,3 +103,23 @@ Luma now has a controlled discovery foundation:
 - `GET /outreach/drafts` — review drafts awaiting human approval.
 
 Deduplication prefers a source external ID, then email, then normalized website domain, then business name. The system does not auto-send outbound messages. Source adapters should only use data sources whose automation terms and applicable laws permit the intended use.
+
+
+## V1.4 Service-specific opportunities
+
+Raw website signals are no longer collapsed into a single “AI Website” opportunity.
+
+`map_to_service_opportunities()` maps observed factors to the existing service catalog:
+
+| Signal family              | Primary services                          |
+|----------------------------|-------------------------------------------|
+| Site errors / HTTPS / mobile / slow load | AI Website, Custom Automation    |
+| Missing contact form / CTA / email     | Lead Capture System, Appointment Automation |
+| Missing phone link                   | AI Receptionist, Appointment Automation   |
+| Multi-signal residual                | Custom Automation                       |
+
+Research jobs and `POST /businesses/{id}/analyze` now create **one opportunity per qualifying service**, each with its own score, evidence factors, title, and linked `service_id`.
+
+`POST /qualify` without `service_name` returns the full list of service-specific opportunities plus an aggregate score. With `service_name` it remains a single weighted score for backward compatibility.
+
+Prompt version for automated research is now `website-analysis-v2`.

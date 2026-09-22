@@ -56,7 +56,7 @@ def analyze_website(url: str) -> dict:
             )
             result["title"] = re.sub(r"\s+", " ", title.group(1)).strip() if title else None
             result["description"] = re.sub(r"\s+", " ", desc.group(1)).strip() if desc else None
-            result["has_mobile_viewport"] = "name="viewport"" in lower or "name='viewport'" in lower
+            result["has_mobile_viewport"] = 'name="viewport"' in lower or "name='viewport'" in lower
             result["has_contact_form"] = "<form" in lower and any(
                 token in lower for token in ("contact", "quote", "appointment", "inquiry")
             )

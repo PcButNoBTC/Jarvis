@@ -8,10 +8,10 @@ from pydantic import BaseModel, HttpUrl
 import psycopg
 
 from db import get_conn
-from qualification import score_opportunity
+from qualification import score_opportunity, map_to_service_opportunities
 from website_analyzer import analyze_website
 
-app = FastAPI(title="Luma API", version="0.2.0")
+app = FastAPI(title="Luma API", version="0.3.0")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
@@ -58,7 +58,7 @@ class OutreachDraftUpdate(BaseModel):
 
 @app.get("/")
 def root():
-    return {"name": "Luma", "version": "0.2.0", "status": "running"}
+    return {"name": "Luma", "version": "0.3.0", "status": "running"}
 
 
 @app.get("/health")
@@ -338,49 +338,102 @@ def run_research_job(job_id: str):
             cur.execute("SELECT * FROM businesses WHERE id=%s",(job["business_id"],))
             business=cur.fetchone()
     try:
-        analysis=analyze_website(business["website_url"])
-        qualification=score_opportunity(analysis,"AI Website")
-        evidence=qualification["factors"]
+        analysis = analyze_website(business["website_url"])
+        service_opps = map_to_service_opportunities(analysis)
+        all_factors = []
+        for o in service_opps:
+            for f in o["factors"]:
+                if f not in all_factors:
+                    all_factors.append(f)
+        # Backward-compatible aggregate for callers that still expect a single qualification
+        qualification = score_opportunity(analysis)
+
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("""INSERT INTO websites
-                    (business_id,url,http_status,https_enabled,mobile_friendly,load_time_ms,cms,technology_stack,last_checked_at)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,'[]'::jsonb,now()) RETURNING id""",
-                    (business["id"],analysis["url"],analysis["http_status"],analysis["https"],
-                     analysis["has_mobile_viewport"],analysis["response_time_ms"],analysis["cms"]))
-                website_id=cur.fetchone()["id"]
-                cur.execute("""INSERT INTO research_reports
-                    (business_id,summary,observed_problems,opportunities,evidence,model,prompt_version)
-                    VALUES (%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s) RETURNING id""",
-                    (business["id"],"Automated website research based only on observed technical signals.",
-                     json.dumps(evidence),json.dumps([{"service":"AI Website","score":qualification["score"]}]),
-                     json.dumps(analysis),"heuristic","website-analysis-v1"))
-                report_id=cur.fetchone()["id"]
-                cur.execute("""INSERT INTO opportunities
-                    (business_id,research_report_id,title,description,problem_evidence,score,
-                     estimated_value_min,estimated_value_max,status,next_action,service_id)
-                    SELECT %s,%s,%s,%s,%s::jsonb,%s,price_min,price_max,
-                           'new','Review evidence and approve outreach',id
-                    FROM services WHERE name='AI Website' RETURNING id""",
-                    (business["id"],report_id,"Website improvement opportunity",
-                     "Observed website signals that may justify a website improvement conversation.",
-                     json.dumps(evidence),qualification["score"]))
-                opportunity=cur.fetchone()
-                cur.execute("""UPDATE research_jobs SET status='completed',completed_at=now(),
-                               locked_at=NULL,last_error=NULL,updated_at=now() WHERE id=%s""",(job_id,))
-                return {"job_id":job_id,"business_id":business["id"],"website_id":website_id,
-                        "research_report_id":report_id,"opportunity_id":opportunity["id"] if opportunity else None,
-                        "qualification":qualification}
+                cur.execute(
+                    """INSERT INTO websites
+                       (business_id,url,http_status,https_enabled,mobile_friendly,load_time_ms,cms,technology_stack,last_checked_at)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,'[]'::jsonb,now()) RETURNING id""",
+                    (
+                        business["id"],
+                        analysis["url"],
+                        analysis["http_status"],
+                        analysis["https"],
+                        analysis["has_mobile_viewport"],
+                        analysis["response_time_ms"],
+                        analysis["cms"],
+                    ),
+                )
+                website_id = cur.fetchone()["id"]
+
+                opp_summaries = [
+                    {"service": o["service"], "score": o["score"]} for o in service_opps
+                ]
+                cur.execute(
+                    """INSERT INTO research_reports
+                       (business_id,summary,observed_problems,opportunities,evidence,model,prompt_version)
+                       VALUES (%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s) RETURNING id""",
+                    (
+                        business["id"],
+                        "Automated website research based only on observed technical signals.",
+                        json.dumps(all_factors),
+                        json.dumps(opp_summaries),
+                        json.dumps(analysis),
+                        "heuristic",
+                        "website-analysis-v2",
+                    ),
+                )
+                report_id = cur.fetchone()["id"]
+
+                opportunity_ids = []
+                for o in service_opps:
+                    cur.execute(
+                        """INSERT INTO opportunities
+                           (business_id,research_report_id,title,description,problem_evidence,score,
+                            estimated_value_min,estimated_value_max,status,next_action,service_id)
+                           SELECT %s,%s,%s,%s,%s::jsonb,%s,price_min,price_max,
+                                  'new','Review evidence and approve outreach',id
+                           FROM services WHERE name=%s RETURNING id""",
+                        (
+                            business["id"],
+                            report_id,
+                            o["title"],
+                            o["description"],
+                            json.dumps(o["factors"]),
+                            o["score"],
+                            o["service"],
+                        ),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        opportunity_ids.append(row["id"])
+
+                cur.execute(
+                    """UPDATE research_jobs SET status='completed',completed_at=now(),
+                       locked_at=NULL,last_error=NULL,updated_at=now() WHERE id=%s""",
+                    (job_id,),
+                )
+                return {
+                    "job_id": job_id,
+                    "business_id": business["id"],
+                    "website_id": website_id,
+                    "research_report_id": report_id,
+                    "opportunity_ids": opportunity_ids,
+                    "opportunities": service_opps,
+                    "qualification": qualification,
+                }
     except Exception as exc:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("""SELECT attempts FROM research_jobs WHERE id=%s""",(job_id,))
-                current=cur.fetchone()
-                attempts=current["attempts"] if current else 3
-                next_status="pending" if attempts < 3 else "failed"
-                cur.execute("""UPDATE research_jobs SET status=%s,last_error=%s,
-                               locked_at=NULL,updated_at=now() WHERE id=%s""",
-                            (next_status,f"{type(exc).__name__}: {exc}",job_id))
+                cur.execute("""SELECT attempts FROM research_jobs WHERE id=%s""", (job_id,))
+                current = cur.fetchone()
+                attempts = current["attempts"] if current else 3
+                next_status = "pending" if attempts < 3 else "failed"
+                cur.execute(
+                    """UPDATE research_jobs SET status=%s,last_error=%s,
+                       locked_at=NULL,updated_at=now() WHERE id=%s""",
+                    (next_status, f"{type(exc).__name__}: {exc}", job_id),
+                )
         raise HTTPException(status_code=500, detail="Research job failed")
 
 
@@ -489,8 +542,13 @@ def analyze_business(business_id: str):
                 raise HTTPException(status_code=400, detail="Business has no website URL")
 
     analysis = analyze_website(business["website_url"])
-    qualification = score_opportunity(analysis, "AI Website")
-    evidence = qualification["factors"]
+    service_opps = map_to_service_opportunities(analysis)
+    all_factors = []
+    for o in service_opps:
+        for f in o["factors"]:
+            if f not in all_factors:
+                all_factors.append(f)
+    qualification = score_opportunity(analysis)
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -501,13 +559,18 @@ def analyze_business(business_id: str):
                    VALUES (%s, %s, %s, %s, %s, %s, %s, '[]'::jsonb, now())
                    RETURNING id""",
                 (
-                    business_id, analysis["url"], analysis["http_status"],
-                    analysis["https"], analysis["has_mobile_viewport"],
-                    analysis["response_time_ms"], analysis["cms"],
+                    business_id,
+                    analysis["url"],
+                    analysis["http_status"],
+                    analysis["https"],
+                    analysis["has_mobile_viewport"],
+                    analysis["response_time_ms"],
+                    analysis["cms"],
                 ),
             )
             website_id = cur.fetchone()["id"]
 
+            opp_summaries = [{"service": o["service"], "score": o["score"]} for o in service_opps]
             cur.execute(
                 """INSERT INTO research_reports
                    (business_id, summary, observed_problems, opportunities, evidence,
@@ -517,39 +580,46 @@ def analyze_business(business_id: str):
                 (
                     business_id,
                     "Automated website research based only on observed technical signals.",
-                    json.dumps(evidence),
-                    json.dumps([{"service": "AI Website", "score": qualification["score"]}]),
+                    json.dumps(all_factors),
+                    json.dumps(opp_summaries),
                     json.dumps(analysis),
                     "heuristic",
-                    "website-analysis-v1",
+                    "website-analysis-v2",
                 ),
             )
             report_id = cur.fetchone()["id"]
 
-            cur.execute(
-                """INSERT INTO opportunities
-                   (business_id, research_report_id, title, description,
-                    problem_evidence, score, estimated_value_min,
-                    estimated_value_max, status, next_action)
-                   SELECT %s, %s, %s, %s, %s::jsonb, %s, price_min, price_max,
-                          'new', 'Review evidence and approve outreach'
-                   FROM services WHERE name = 'AI Website'
-                   RETURNING id""",
-                (
-                    business_id, report_id,
-                    "Website improvement opportunity",
-                    "Observed website signals that may justify a website improvement conversation.",
-                    json.dumps(evidence),
-                    qualification["score"],
-                ),
-            )
-            opportunity = cur.fetchone()
+            opportunity_ids = []
+            for o in service_opps:
+                cur.execute(
+                    """INSERT INTO opportunities
+                       (business_id, research_report_id, title, description,
+                        problem_evidence, score, estimated_value_min,
+                        estimated_value_max, status, next_action, service_id)
+                       SELECT %s, %s, %s, %s, %s::jsonb, %s, price_min, price_max,
+                              'new', 'Review evidence and approve outreach', id
+                       FROM services WHERE name = %s
+                       RETURNING id""",
+                    (
+                        business_id,
+                        report_id,
+                        o["title"],
+                        o["description"],
+                        json.dumps(o["factors"]),
+                        o["score"],
+                        o["service"],
+                    ),
+                )
+                row = cur.fetchone()
+                if row:
+                    opportunity_ids.append(row["id"])
 
     return {
         "business_id": business_id,
         "website_id": website_id,
         "research_report_id": report_id,
-        "opportunity_id": opportunity["id"] if opportunity else None,
+        "opportunity_ids": opportunity_ids,
+        "opportunities": service_opps,
         "analysis": analysis,
         "qualification": qualification,
     }
@@ -557,10 +627,22 @@ def analyze_business(business_id: str):
 
 @app.post("/qualify")
 def qualify(payload: dict):
+    """
+    Score an analysis. If service_name is provided, return a single service-weighted score.
+    If map_services=true (default when no service_name), return the full list of
+    service-specific opportunities.
+    """
     analysis = payload.get("analysis")
     if not isinstance(analysis, dict):
         raise HTTPException(status_code=400, detail="analysis object is required")
-    return score_opportunity(analysis, payload.get("service_name"))
+    service_name = payload.get("service_name")
+    if service_name:
+        return score_opportunity(analysis, service_name)
+    # Default: full service-specific mapping
+    return {
+        "opportunities": map_to_service_opportunities(analysis),
+        "aggregate": score_opportunity(analysis),
+    }
 
 
 from sales import build_call_prep, build_proposal_content
