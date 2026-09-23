@@ -52,6 +52,18 @@ async def api_key_guard(request: Request, call_next):
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
+def bootstrap_agent_policies():
+    from agent_layer import AGENTS
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for name, definition in AGENTS.items():
+                cur.execute(
+                    """INSERT INTO agent_policies(agent_name,budget_usd,tools,approval_required)
+                       VALUES (%s,%s,%s::jsonb,%s)
+                       ON CONFLICT (agent_name) DO NOTHING""",
+                    (name, definition["default_budget"], json.dumps(definition["tools"]), definition["approval_required"]),
+                )
+
 def bootstrap_owner():
     email=os.getenv("LUMA_ADMIN_EMAIL")
     password_hash=os.getenv("LUMA_ADMIN_PASSWORD_HASH")
@@ -72,6 +84,7 @@ def startup():
         try:
             ensure_delivery_schema()
             bootstrap_owner()
+            bootstrap_agent_policies()
         except Exception as exc:
             print(f"[luma] startup initialization failed: {type(exc).__name__}: {exc}", flush=True)
 
@@ -331,13 +344,18 @@ def advance_workflow_run(run_id: str, payload: dict):
                 step = next_step(run["workflow_name"], run["current_step"])
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
-            status = payload.get("status") or ("completed" if step is None else "running")
+            from workflows import is_approval_step
+            waiting = bool(step and is_approval_step(run["workflow_name"], step) and payload.get("approved") is not True)
+            if waiting:
+                status = "awaiting_approval"
+            else:
+                status = payload.get("status") or ("completed" if step is None else "running")
             cur.execute(
                 """UPDATE workflow_runs
-                   SET current_step=%s, status=%s, output=%s::jsonb,
+                   SET current_step=%s, status=%s, waiting_for_approval=%s, output=%s::jsonb,
                        completed_at=CASE WHEN %s='completed' THEN now() ELSE completed_at END
                    WHERE id=%s RETURNING *""",
-                (step, status, json.dumps(payload.get("output") or {}), status, run_id),
+                (step, status, waiting, json.dumps(payload.get("output") or {}), status, run_id),
             )
             return cur.fetchone()
 
