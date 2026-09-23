@@ -3176,6 +3176,52 @@ def scan_blueprint_optimizations(payload: dict):
                 created.append(cur.fetchone())
             return {"created":created,"count":len(created),"automation":"proposal_only_until_approval"}
 
+@app.post("/analytics/blueprint-optimizations/{proposal_id}/approve")
+def approve_blueprint_optimization(proposal_id: str, payload: dict, request: Request):
+    if payload.get("approved") is not True:
+        raise HTTPException(status_code=400,detail="Explicit approved=true is required")
+    principal=request.state.principal
+    if principal.get("role") not in {"owner","admin","operator"}:
+        raise HTTPException(status_code=403,detail="Operator approval required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM blueprint_optimization_proposals WHERE id=%s",(proposal_id,))
+            proposal=cur.fetchone()
+            if not proposal: raise HTTPException(status_code=404,detail="Optimization proposal not found")
+            cur.execute("""UPDATE blueprint_optimization_proposals
+                           SET status='approved',approved_at=now(),approved_by=%s WHERE id=%s RETURNING *""",
+                        (principal.get("sub"),proposal_id))
+            return cur.fetchone()
+
+@app.post("/analytics/blueprint-optimizations/{proposal_id}/publish")
+def publish_blueprint_optimization(proposal_id: str, payload: dict, request: Request):
+    if payload.get("approved") is not True:
+        raise HTTPException(status_code=400,detail="Explicit approved=true is required")
+    principal=request.state.principal
+    if principal.get("role") not in {"owner","admin"}:
+        raise HTTPException(status_code=403,detail="Owner/admin approval required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT p.*,s.name AS service_name
+                          FROM blueprint_optimization_proposals p
+                          LEFT JOIN services s ON s.id=p.service_id WHERE p.id=%s""",(proposal_id,))
+            proposal=cur.fetchone()
+            if not proposal: raise HTTPException(status_code=404,detail="Optimization proposal not found")
+            if proposal["status"]!="approved": raise HTTPException(status_code=409,detail="Proposal must be approved before publish")
+            if not proposal["service_id"]: raise HTTPException(status_code=409,detail="Proposal has no service")
+            cur.execute("SELECT COALESCE(MAX(version),0)+1 AS next_version FROM service_blueprint_versions WHERE service_id=%s",(proposal["service_id"],))
+            version=cur.fetchone()["next_version"]
+            recommendation=proposal["recommendation"] or {}
+            cur.execute("UPDATE service_blueprint_versions SET active=false WHERE service_id=%s",(proposal["service_id"],))
+            cur.execute("""INSERT INTO service_blueprint_versions(service_id,version,blueprint,active)
+                           SELECT %s,%s,blueprint || %s::jsonb,true
+                           FROM service_blueprint_versions WHERE service_id=%s
+                           ORDER BY version DESC LIMIT 1 RETURNING *""",
+                        (proposal["service_id"],version,json.dumps({"optimization":recommendation}),proposal["service_id"]))
+            created=cur.fetchone()
+            cur.execute("UPDATE blueprint_optimization_proposals SET status='published' WHERE id=%s",(proposal_id,))
+            return {"proposal":proposal,"published_blueprint":created}
+
 @app.get("/analytics/blueprint-optimizations")
 def list_blueprint_optimizations(status: str|None=None):
     with get_conn() as conn:
