@@ -1,5 +1,5 @@
 """Runtime bridge to live provider adapters."""
-from provider_adapters import get_adapter
+from provider_adapters import get_adapter, ProviderAdapter
 
 class RuntimeRegistry:
     def __init__(self): self.adapters={}
