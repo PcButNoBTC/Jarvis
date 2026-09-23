@@ -23,6 +23,7 @@ from portal import create_token, hash_token
 from auth import hash_password, verify_password, issue_token
 from scheduler import next_run
 from oauth import authorization_url, verify_state
+from client_trust import assess_opportunity, outreach_disposition, should_expand
 
 app = FastAPI(title="Luma API", version="0.7.0")
 
