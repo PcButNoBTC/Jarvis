@@ -3386,6 +3386,10 @@ def charge_agent_budget(payload: dict):
 
 @app.websocket("/voice/stream")
 async def voice_stream(websocket: WebSocket):
+    signature=websocket.headers.get("X-Twilio-Signature")
+    if not validate_twilio_signature(str(websocket.url), {}, signature):
+        await websocket.close(code=1008)
+        return
     await websocket.accept()
     try:
         await realtime_bridge(websocket, os.getenv("LUMA_VOICE_PUBLIC_URL"))
