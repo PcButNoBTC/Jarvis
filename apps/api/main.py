@@ -3473,8 +3473,15 @@ def end_voice_session(session_id: str, payload: dict):
 
 @app.post("/voice/twilio/incoming")
 def twilio_incoming(request: Request):
-    # Use the real-time stream path when configured; otherwise use the
-    # compatibility speech-gather path.
+    call_sid=request.query_params.get("CallSid") or request.headers.get("X-Twilio-CallSid")
+    if DATABASE_URL and call_sid:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO voice_sessions(caller,mode,status,disclosed)
+                       VALUES (%s,'receptionist','active',false)""",
+                    (call_sid,),
+                )
     stream_url=os.getenv("LUMA_VOICE_STREAM_URL")
     if stream_url:
         xml=twilio_stream_twiml(stream_url)
@@ -3486,11 +3493,11 @@ def twilio_incoming(request: Request):
 
 @app.post("/voice/twilio/gather")
 async def twilio_gather(request: Request):
-    form=await request.form()
+    from urllib.parse import parse_qs
+    body=(await request.body()).decode("utf-8","replace")
+    form={k:v[-1] for k,v in parse_qs(body).items()}
     transcript=(form.get("SpeechResult") or "").strip()
     call_sid=form.get("CallSid")
-    # This endpoint persists the turn. A realtime/model bridge should generate
-    # the actual natural response and return TwiML/stream audio.
     if transcript and DATABASE_URL:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -3509,3 +3516,6 @@ async def twilio_gather(request: Request):
                     )
     action_url=str(request.base_url).rstrip("/")+"/voice/twilio/gather"
     return Response(content=twilio_gather_twiml(action_url,"Thanks. I heard you. I can continue by email, or the voice system can continue this conversation."),media_type="application/xml")
+
+
+
