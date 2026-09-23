@@ -6,12 +6,21 @@ provider-neutral turn handling. A real-time speech provider can plug into the
 same session without changing client/project logic.
 """
 from __future__ import annotations
-import os, time, uuid, base64, hashlib, hmac
+import os, time, uuid, base64, hashlib, hmac, re
 from dataclasses import dataclass, field
 from typing import Any
 
 VOICE_MODES = {"receptionist", "qualification", "scheduling", "support", "client_success", "sales_assistant"}
-END_REASONS = {"user_requested", "escalated", "completed", "provider_error", "policy_blocked"}
+END_REASONS = {"user_requested", "escalated", "completed", "provider_error", "policy_blocked", "timeout"}
+E164_RE = re.compile(r"^\+[1-9]\d{7,14}$")
+
+def communication_policy(*, do_not_call: bool = False, preferred_channel: str = "email") -> dict[str, Any]:
+    return {"do_not_call": bool(do_not_call), "preferred_channel": preferred_channel or "email", "voice_allowed": not bool(do_not_call)}
+
+def validate_destination(number: str) -> str:
+    value=(number or "").strip()
+    if not E164_RE.fullmatch(value): raise ValueError("Phone numbers must use E.164 format")
+    return value
 
 @dataclass
 class VoiceSession:
@@ -40,7 +49,7 @@ def system_policy(mode: str) -> str:
         "Listen before answering; do not interrupt; acknowledge corrections. "
         "Never invent pricing, capabilities, appointments, credentials, outcomes, "
         "or commitments. If uncertain, say so and offer email follow-up or a human "
-        "handoff. Respect do-not-call and communication preferences. Only perform "
+        "handoff. Respect do-not-call and communication preferences. Ask before consequential actions. Only perform "
         "actions explicitly authorized by policy. "
         f"Current mode: {mode}."
     )
@@ -166,10 +175,10 @@ async def realtime_bridge(twilio_ws, public_url: str | None = None):
                     if kind=="error":
                         await twilio_ws.send_text(json.dumps({"event":"clear","streamSid":stream_sid})) if stream_sid else None
         import asyncio
-        done,_=await asyncio.wait(
-            [asyncio.create_task(from_twilio()),asyncio.create_task(to_twilio())],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
+        tasks=[asyncio.create_task(from_twilio()),asyncio.create_task(to_twilio())]
+        done,pending=await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in pending: task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
         for task in done:
-            if task.exception() and not isinstance(task.exception(), RuntimeError):
-                raise task.exception()
+            exc=task.exception()
+            if exc and not isinstance(exc, (RuntimeError, asyncio.CancelledError)): raise exc
