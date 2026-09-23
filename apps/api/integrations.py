@@ -12,7 +12,7 @@ INTEGRATION_PROVIDERS = {
     "calendar": [
         {"provider": "google_calendar", "capabilities": ["create_event", "read_availability", "health_check"]},
         {"provider": "microsoft_outlook", "capabilities": ["create_event", "read_availability", "health_check"]},
-        {"provider": "calendly", "capabilities": ["booking_link", "read_availability", "health_check"]},
+        {"provider": "calendly", "capabilities": ["booking_link", "list_event_types", "health_check"]},
         {"provider": "client_managed", "capabilities": ["handoff_only"]},
     ],
     "hosting": [
@@ -96,7 +96,7 @@ def suggestions_for_service(service: str | None):
 PROVIDER_SETUP = {
     "google_calendar": {"auth": "oauth", "credentials": ["oauth_client"], "steps": ["Connect Google account", "Grant calendar permissions", "Select calendar", "Run availability test"], "human_approval": True},
     "microsoft_outlook": {"auth": "oauth", "credentials": ["oauth_client"], "steps": ["Connect Microsoft account", "Grant calendar permissions", "Select calendar", "Run availability test"], "human_approval": True},
-    "calendly": {"auth": "api_key_or_oauth", "credentials": ["api_key_or_oauth"], "steps": ["Connect Calendly", "Select event type", "Run booking/availability test"], "human_approval": True},
+    "calendly": {"auth": "oauth", "credentials": ["oauth_client"], "steps": ["Connect Calendly account", "Grant requested permissions", "Select event type", "Run connection test"], "human_approval": True},
     "twilio": {"auth": "api_credentials", "credentials": ["account_sid", "auth_token"], "steps": ["Connect Twilio", "Select or purchase number", "Configure webhook", "Run inbound/outbound test"], "human_approval": True},
     "telnyx": {"auth": "api_credentials", "credentials": ["api_key", "messaging_profile"], "steps": ["Connect Telnyx", "Select number", "Configure webhook", "Run inbound/outbound test"], "human_approval": True},
     "existing_phone_system": {"auth": "client_managed", "credentials": [], "steps": ["Provide forwarding/routing details", "Confirm escalation number", "Run call test"], "human_approval": True},
