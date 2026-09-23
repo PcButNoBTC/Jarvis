@@ -22,6 +22,7 @@ from security import authenticate, can, PUBLIC_PATHS
 from portal import create_token, hash_token
 from auth import hash_password, verify_password, issue_token
 from scheduler import next_run
+from oauth import authorization_url, verify_state
 
 app = FastAPI(title="Luma API", version="0.7.0")
 
@@ -2587,3 +2588,21 @@ def analytics_margins():
                  "contribution": float(row["revenue"] or 0)-float(row["direct_costs"] or 0)-float(row["model_costs"] or 0)}
                 for row in rows
             ]
+
+
+@app.get("/integrations/oauth/{provider}/start")
+def oauth_start(provider: str, project_id: str, request: Request):
+    if provider not in {"google_calendar","microsoft_outlook","hubspot"}:
+        raise HTTPException(status_code=400, detail="Unsupported OAuth provider")
+    redirect_uri=str(request.base_url).rstrip("/") + f"/integrations/oauth/{provider}/callback"
+    try: return {"authorization_url":authorization_url(provider,project_id,redirect_uri)}
+    except RuntimeError as exc: raise HTTPException(status_code=500,detail=str(exc))
+
+@app.get("/integrations/oauth/{provider}/callback")
+def oauth_callback(provider: str, code: str, state: str, request: Request):
+    claims=verify_state(state)
+    if not claims or claims.get("provider")!=provider:
+        raise HTTPException(status_code=400,detail="Invalid or expired OAuth state")
+    # Token exchange is intentionally delegated to the provider adapter layer;
+    # no authorization code or token is persisted by this callback.
+    return {"status":"authorized_code_received","provider":provider,"project_id":claims["project_id"],"next_step":"token_exchange"}
