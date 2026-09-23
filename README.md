@@ -492,3 +492,26 @@ The goal of a strong MVP is not feature count. A module is considered strong whe
 ### Self-hosted security
 
 Set LUMA_API_KEY in production. When it is set, API routes require the X-Luma-Key header; health and root endpoints remain available for infrastructure checks. The worker can use the same key. This is a lightweight deployment guard, not a replacement for full user/role authentication.
+
+
+## Client-friendly growth model
+
+Luma is designed to be profitable without treating local businesses as targets to extract value from. The commercial rule is **diagnose before selling**.
+
+- **Evidence before recommendation:** show observable signals before proposing a service.
+- **Problem before product:** separate the documented problem from the possible solution.
+- **Smallest useful fix:** do not force a larger automation project when a simpler fix is appropriate.
+- **Why this / why not:** proposals can include alternatives and reasons not to pursue other services.
+- **No-pressure outreach:** declines, complaints, and do-not-contact requests suppress further outreach.
+- **Human control:** consequential outbound and production actions remain approval-gated.
+- **Client outcomes:** record baselines and measured results before expansion.
+- **Client preferences:** AI disclosure, communication preferences, and data-ownership messaging are explicit.
+- **Regional playbooks:** proven offers and client-success evidence are recorded before expanding to another region.
+
+The API exposes this through opportunity fit assessment, outreach eligibility, client preferences, client outcomes, and regional playbook endpoints. See CLIENT-TRUST.md for the operating rules.
+
+### Client-facing promise
+
+> We will show you what we observed, explain why it may matter, give you options, and let you decide. If we do not think automation is appropriate, we will say so.
+
+This approach is intended to build long-term local reputation and referrals while still optimizing for profitable delivery and measurable client outcomes.
