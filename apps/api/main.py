@@ -3472,8 +3472,11 @@ def end_voice_session(session_id: str, payload: dict):
 
 
 @app.post("/voice/twilio/incoming")
-def twilio_incoming(request: Request):
-    call_sid=request.query_params.get("CallSid") or request.headers.get("X-Twilio-CallSid")
+async def twilio_incoming(request: Request):
+    from urllib.parse import parse_qs
+    body=(await request.body()).decode("utf-8","replace")
+    form={k:v[-1] for k,v in parse_qs(body).items()}
+    call_sid=form.get("CallSid") or request.query_params.get("CallSid") or request.headers.get("X-Twilio-CallSid")
     if DATABASE_URL and call_sid:
         with get_conn() as conn:
             with conn.cursor() as cur:
