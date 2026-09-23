@@ -3437,7 +3437,8 @@ def voice_test_call(payload: dict, request: Request):
             integration,
             "place_call",
             {"to":to,"from":payload.get("from") or os.getenv("TWILIO_FROM_NUMBER"),
-             "url":payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/incoming")}
+             "url":payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/incoming"),
+             "status_callback":payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL")}
         )
     except Exception as exc:
         raise HTTPException(status_code=502,detail=f"Voice provider error: {type(exc).__name__}")
@@ -3560,6 +3561,26 @@ async def twilio_incoming(request: Request):
         xml=twilio_gather_twiml(action_url, disclosure_text())
     return Response(content=xml, media_type="application/xml")
 
+
+@app.post("/voice/twilio/status")
+async def twilio_status(request: Request):
+    from urllib.parse import parse_qs
+    body=(await request.body()).decode("utf-8","replace")
+    form={k:v[-1] for k,v in parse_qs(body).items()}
+    if not validate_twilio_signature(str(request.url), form, request.headers.get("X-Twilio-Signature")):
+        raise HTTPException(status_code=403, detail="Invalid Twilio webhook signature")
+    call_sid=form.get("CallSid")
+    status=form.get("CallStatus")
+    if DATABASE_URL and call_sid:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""UPDATE voice_sessions
+                               SET last_provider_status=%s,
+                                   status=CASE WHEN %s IN ('completed','canceled','failed','busy','no-answer') THEN 'completed' ELSE status END,
+                                   ended_at=CASE WHEN %s IN ('completed','canceled','failed','busy','no-answer') THEN COALESCE(ended_at,now()) ELSE ended_at END
+                               WHERE provider_call_id=%s OR caller=%s""",
+                            (status,status,status,call_sid,call_sid))
+    return {"ok":True,"call_sid":call_sid,"status":status}
 
 @app.post("/voice/twilio/gather")
 async def twilio_gather(request: Request):
