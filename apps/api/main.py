@@ -3438,10 +3438,18 @@ def voice_test_call(payload: dict, request: Request):
             "place_call",
             {"to":to,"from":payload.get("from") or os.getenv("TWILIO_FROM_NUMBER"),
              "url":payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/incoming"),
-             "status_callback":payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL")}
+             "status_callback":payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/status")
         )
     except Exception as exc:
         raise HTTPException(status_code=502,detail=f"Voice provider error: {type(exc).__name__}")
+    provider_data=result.data if isinstance(result.data,dict) else {}
+    call_sid=provider_data.get("sid")
+    if result.status=="ok" and DATABASE_URL and call_sid:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO voice_sessions(caller,mode,status,disclosed,provider,provider_call_id,max_duration_seconds)
+                               VALUES (%s,'receptionist','active',false,'twilio',%s,%s)""",
+                            (to,call_sid,int(os.getenv("LUMA_VOICE_MAX_DURATION_SECONDS","1800"))))
     return {"provider_result":result.__dict__,"governance":decision.__dict__}
 
 
@@ -3547,7 +3555,7 @@ async def twilio_incoming(request: Request):
                 cur.execute(
                     """INSERT INTO voice_sessions(caller,mode,status,disclosed)
                        VALUES (%s,'receptionist','active',false)""",
-                    (call_sid,),
+                    (form.get("From") or call_sid,),
                 )
     stream_url=os.getenv("LUMA_VOICE_STREAM_URL")
     if not stream_url:
