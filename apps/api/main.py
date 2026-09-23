@@ -2779,6 +2779,9 @@ def oauth_callback(provider: str, code: str, state: str, request: Request):
     try:
         tokens = token_request(provider, code, redirect_uri, claims.get("code_verifier"))
         secret_ref = f"oauth/{provider}/{claims['project_id']}"
+        if tokens.get("expires_in"):
+            from time import time
+            tokens["expires_at"]=time()+float(tokens["expires_in"])
         secret_backend().put(secret_ref, json.dumps(tokens))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"OAuth connection failed: {type(exc).__name__}")
