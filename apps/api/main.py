@@ -22,8 +22,10 @@ from security import authenticate, can, PUBLIC_PATHS
 from portal import create_token, hash_token
 from auth import hash_password, verify_password, issue_token
 from scheduler import next_run
-from oauth import authorization_url, verify_state
+from oauth import authorization_url, verify_state, token_request
 from client_trust import assess_opportunity, outreach_disposition, should_expand
+from secret_backend import backend as secret_backend
+from provider_adapters import get_adapter
 
 app = FastAPI(title="Luma API", version="0.8.0")
 
@@ -2633,20 +2635,58 @@ def analytics_margins():
 
 @app.get("/integrations/oauth/{provider}/start")
 def oauth_start(provider: str, project_id: str, request: Request):
-    if provider not in {"google_calendar","microsoft_outlook","hubspot"}:
+    if provider not in {"google_calendar","microsoft_outlook","hubspot","calendly"}:
         raise HTTPException(status_code=400, detail="Unsupported OAuth provider")
-    redirect_uri=str(request.base_url).rstrip("/") + f"/integrations/oauth/{provider}/callback"
-    try: return {"authorization_url":authorization_url(provider,project_id,redirect_uri)}
-    except RuntimeError as exc: raise HTTPException(status_code=500,detail=str(exc))
+    redirect_uri = str(request.base_url).rstrip("/") + f"/integrations/oauth/{provider}/callback"
+    try:
+        return {"authorization_url": authorization_url(provider, project_id, redirect_uri)}
+    except (RuntimeError, KeyError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 @app.get("/integrations/oauth/{provider}/callback")
 def oauth_callback(provider: str, code: str, state: str, request: Request):
-    claims=verify_state(state)
-    if not claims or claims.get("provider")!=provider:
-        raise HTTPException(status_code=400,detail="Invalid or expired OAuth state")
-    # Token exchange is intentionally delegated to the provider adapter layer;
-    # no authorization code or token is persisted by this callback.
-    return {"status":"authorized_code_received","provider":provider,"project_id":claims["project_id"],"next_step":"token_exchange"}
+    claims = verify_state(state)
+    if not claims or claims.get("provider") != provider:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    redirect_uri = str(request.base_url).rstrip("/") + f"/integrations/oauth/{provider}/callback"
+    try:
+        tokens = token_request(provider, code, redirect_uri, claims.get("code_verifier"))
+        secret_ref = f"oauth/{provider}/{claims['project_id']}"
+        secret_backend().put(secret_ref, json.dumps(tokens))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"OAuth connection failed: {type(exc).__name__}")
+
+    category = "crm" if provider == "hubspot" else "calendar"
+    capabilities = next((item["capabilities"] for item in providers(category) if item["provider"] == provider), [])
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE integration_connections
+                   SET status='connected', secret_ref=%s, scopes=%s::jsonb, metadata=metadata || %s::jsonb
+                   WHERE project_id=%s AND provider=%s
+                   RETURNING *""",
+                (
+                    secret_ref,
+                    json.dumps((tokens.get("scope") or "").split() if isinstance(tokens.get("scope"), str) else []),
+                    json.dumps({"oauth": True, "capabilities": capabilities}),
+                    claims["project_id"], provider,
+                ),
+            )
+            integration = cur.fetchone()
+            if not integration:
+                cur.execute(
+                    """INSERT INTO integration_connections
+                       (project_id, provider, category, status, capabilities, secret_ref, scopes, metadata)
+                       VALUES (%s,%s,%s,'connected',%s::jsonb,%s,%s::jsonb,%s::jsonb)
+                       RETURNING *""",
+                    (
+                        claims["project_id"], provider, category, json.dumps(capabilities), secret_ref,
+                        json.dumps((tokens.get("scope") or "").split() if isinstance(tokens.get("scope"), str) else []),
+                        json.dumps({"oauth": True}),
+                    ),
+                )
+                integration = cur.fetchone()
+    return {"status": "connected", "provider": provider, "project_id": claims["project_id"], "integration": integration, "token_storage": "secret_manager"}
 
 
 # Client trust, outcome, and regional-growth controls.
