@@ -135,3 +135,22 @@ Every module must have:
 ## Remaining production dependencies
 
 The control plane now includes a client-trust layer: evidence-based fit review, outreach suppression, client preferences, outcome tracking, and regional playbooks. Live third-party execution is intentionally separate. The remaining work is provider adapter implementation and credential infrastructure: OAuth/API-key exchange for selected calendar/CRM providers, Infisical-backed secret storage, real calendar/CRM calls, and remaining email/phone/forms/payment/hosting calls, cron parsing/event delivery, and production authentication/RBAC. The registry, project configuration, approval history, secret references, and human gates are already in place so those adapters can be added without changing the project model.
+
+
+## Phase 12 — Control & Intelligence Core (revamp)
+- [x] Evidence/claim provenance model
+- [x] Evidence-strength separate from model confidence
+- [x] Reusable service blueprints
+- [x] Runtime action policy decisions
+- [x] Agent budget ledger and hard charge enforcement
+- [x] Scoped agent tool gateway
+- [x] Tamper-evident action receipts
+- [x] Durable workflow checkpoints
+- [x] Retry/backoff primitives
+- [x] Client metric snapshots
+- [x] Agent trajectory events
+- [x] Unit economics endpoint
+- [x] Security event schema
+- [ ] DB-backed distributed rate limiting
+- [ ] Provider actions fully wrapped by gateway/policy middleware
+- [ ] Automated outcome-to-blueprint optimization
