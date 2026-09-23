@@ -823,12 +823,21 @@ def run_research_job(job_id: str):
 
                 opportunity_ids = []
                 for o in service_opps:
+                    fit = assess_opportunity(
+                        evidence_count=min(100, len(o.get("factors") or []) * 20),
+                        evidence_confidence=o.get("confidence") or 0,
+                        impact_confidence=min(100, float(o.get("score") or 0)),
+                        solution_fit=min(100, float(o.get("score") or 0)),
+                        intrusiveness_risk=20,
+                        problem_proven=bool(o.get("factors")),
+                    )
                     cur.execute(
                         """INSERT INTO opportunities
                            (business_id,research_report_id,title,description,problem_evidence,score,
-                            confidence,rationale,factors,estimated_value_min,estimated_value_max,status,next_action,service_id)
+                            confidence,rationale,factors,estimated_value_min,estimated_value_max,status,next_action,service_id,
+                            fit_score,fit_disposition,why_this,why_not,alternatives)
                            SELECT %s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,price_min,price_max,
-                                  'new','Review evidence and approve outreach',id
+                                  'new','Review evidence and approve outreach',id,%s,%s,%s,%s::jsonb,%s::jsonb
                            FROM services WHERE name=%s RETURNING id""",
                         (
                             business["id"],
@@ -840,6 +849,11 @@ def run_research_job(job_id: str):
                             o.get("confidence"),
                             o["description"],
                             json.dumps(o["factors"]),
+                            fit["score"],
+                            fit["disposition"],
+                            "Observed signals indicate a possible fit; human review should confirm business impact.",
+                            json.dumps([]),
+                            json.dumps([]),
                             o["service"],
                         ),
                     )
