@@ -2633,7 +2633,19 @@ def execute_provider_action(integration_id: str, payload: dict, request: Request
                            VALUES (%s,%s,'provider_action','integration_connection',%s,%s::jsonb)""",
                         (principal.get("role","agent"),principal.get("sub"),integration_id,
                          json.dumps({"capability":capability,"status":status})))
-    return {"executed":True,"decision":decision.__dict__,"result":result.__dict__ if hasattr(result,"__dict__") else result}
+            cur.execute("SELECT receipt_hash FROM agent_action_receipts ORDER BY created_at DESC LIMIT 1")
+            previous=cur.fetchone()
+            receipt=make_receipt(action=action,decision=decision.decision,actor=principal.get("sub","unknown"),
+                                  entity_type="integration_connection",entity_id=integration_id,
+                                  previous_hash=previous["receipt_hash"] if previous else None,
+                                  metadata={"capability":capability,"status":status})
+            cur.execute("""INSERT INTO agent_action_receipts
+              (actor_type,actor_id,action,decision,risk,reason,previous_hash,receipt_hash,entity_type,entity_id,metadata)
+              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
+              (principal.get("role","agent"),principal.get("sub"),action,decision.decision,decision.risk,decision.reason,
+               receipt["previous_hash"],receipt["hash"],"integration_connection",integration_id,json.dumps(receipt["metadata"])))
+    return {"executed":True,"decision":decision.__dict__,"receipt_hash":receipt["hash"],
+            "result":result.__dict__ if hasattr(result,"__dict__") else result}
 
 @app.post("/integrations/{integration_id}/verify")
 def verify_integration(integration_id: str, payload: dict):
