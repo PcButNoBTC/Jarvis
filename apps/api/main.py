@@ -52,6 +52,23 @@ async def api_key_guard(request: Request, call_next):
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
+def bootstrap_service_blueprints():
+    from service_blueprints import blueprint
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id,name FROM services WHERE active=true")
+            for service in cur.fetchall():
+                try:
+                    data=blueprint(service["name"])
+                except ValueError:
+                    continue
+                cur.execute(
+                    """INSERT INTO service_blueprint_versions(service_id,version,blueprint,active)
+                       VALUES (%s,1,%s::jsonb,true)
+                       ON CONFLICT (service_id,version) DO NOTHING""",
+                    (service["id"], json.dumps(data)),
+                )
+
 def bootstrap_agent_policies():
     from agent_layer import AGENTS
     with get_conn() as conn:
@@ -85,6 +102,7 @@ def startup():
             ensure_delivery_schema()
             bootstrap_owner()
             bootstrap_agent_policies()
+            bootstrap_service_blueprints()
         except Exception as exc:
             print(f"[luma] startup initialization failed: {type(exc).__name__}: {exc}", flush=True)
 
