@@ -3553,9 +3553,9 @@ async def twilio_incoming(request: Request):
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """INSERT INTO voice_sessions(caller,mode,status,disclosed)
-                       VALUES (%s,'receptionist','active',false)""",
-                    (form.get("From") or call_sid,),
+                    """INSERT INTO voice_sessions(caller,provider,provider_call_id,mode,status,disclosed,max_duration_seconds)
+                       VALUES (%s,'twilio',%s,'receptionist','active',false,%s)""",
+                    (form.get("From") or call_sid,call_sid,int(os.getenv("LUMA_VOICE_MAX_DURATION_SECONDS","1800"))),
                 )
     stream_url=os.getenv("LUMA_VOICE_STREAM_URL")
     if not stream_url:
