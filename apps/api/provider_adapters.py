@@ -42,6 +42,38 @@ class TokenAdapter(ProviderAdapter):
         except Exception as exc:
             return None, str(exc)
 
+class SMTPAdapter(ProviderAdapter):
+    provider = "smtp"
+    capabilities = {"health_check", "send_email"}
+    def health_check(self):
+        host=self.credentials.get("host") or os.getenv("SMTP_HOST")
+        port=int(self.credentials.get("port") or os.getenv("SMTP_PORT","587"))
+        return ProviderResponse("ok" if host and port else "error",self.provider,"health_check",{"host_configured":bool(host),"port":port},
+                                None if host else "Missing SMTP host")
+    def execute(self, capability, payload=None):
+        if capability!="send_email": return super().execute(capability,payload)
+        import smtplib
+        from email.message import EmailMessage
+        payload=payload or {}
+        host=self.credentials.get("host") or os.getenv("SMTP_HOST")
+        port=int(self.credentials.get("port") or os.getenv("SMTP_PORT","587"))
+        username=self.credentials.get("username") or os.getenv("SMTP_USERNAME")
+        password=self.credentials.get("password") or os.getenv("SMTP_PASSWORD")
+        sender=payload.get("from") or self.credentials.get("from") or username
+        if not host or not sender or not payload.get("to"):
+            return ProviderResponse("error",self.provider,capability,{},"Missing SMTP host/sender/recipient")
+        message=EmailMessage()
+        message["From"]=sender; message["To"]=payload["to"]; message["Subject"]=payload.get("subject","")
+        message.set_content(payload.get("body",""))
+        try:
+            with smtplib.SMTP(host,port,timeout=20) as smtp:
+                smtp.starttls()
+                if username and password: smtp.login(username,password)
+                smtp.send_message(message)
+            return ProviderResponse("ok",self.provider,capability,{"sent":True,"to":payload["to"]})
+        except Exception as exc:
+            return ProviderResponse("error",self.provider,capability,{},type(exc).__name__)
+
 class GoogleCalendarAdapter(TokenAdapter):
     provider = "google_calendar"
     capabilities = {"health_check", "list_calendars", "read_availability", "create_event"}
@@ -146,6 +178,7 @@ class ClientManagedAdapter(ProviderAdapter):
     def execute(self, capability, payload=None): return ProviderResponse("handoff_required", self.provider, capability, payload or {}, "Client must complete this provider action")
 
 ADAPTERS = {
+    "smtp": SMTPAdapter,
     "google_calendar": GoogleCalendarAdapter,
     "microsoft_outlook": MicrosoftOutlookAdapter,
     "hubspot": HubSpotAdapter,
