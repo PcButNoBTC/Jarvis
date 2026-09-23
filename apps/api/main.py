@@ -2017,12 +2017,16 @@ def save_launch_settings(project_id: str, payload: LaunchSettingsUpdate):
             return result
 
 @app.post("/projects/{project_id}/deploy")
-def deploy_project_delivery(project_id: str):
+def deploy_project_delivery(project_id: str, request: Request):
     with get_conn() as conn:
         with conn.cursor() as cur:
             project, implementation = _delivery_project(cur, project_id)
             if implementation["status"] != "approved":
                 raise HTTPException(status_code=409, detail="Project must be approved before deployment")
+            principal=request.state.principal
+            decision=evaluate_action("deploy",tools=["deploy"],approval_required=True,approved=True)
+            if decision.decision!="allow":
+                raise HTTPException(status_code=403,detail=decision.reason)
             cur.execute("SELECT settings FROM launch_settings WHERE project_id=%s", (project_id,))
             launch_row = cur.fetchone()
             launch_settings = launch_row["settings"] if launch_row else {}
@@ -2057,7 +2061,7 @@ def deploy_project_delivery(project_id: str):
                     (project_id,),
                 )
                 project = cur.fetchone()
-                return {"project": project, "implementation": implementation, "deployment": cur.fetchone() if False else result}
+                return {"project": project, "implementation": implementation, "deployment": result,"governance":decision.__dict__}
     except Exception as exc:
         with get_conn() as conn:
             with conn.cursor() as cur:
