@@ -536,3 +536,30 @@ Luma now includes a control-plane layer inspired by the strongest patterns found
 The design principle is **evidence → policy → controlled action → receipt → outcome → learning**, not unrestricted autonomous execution.
 
 This architecture is informed by public research into projects such as Orionfold Relay, Comp AI CRM, JamJet, BoundFlow, SimplerDevelopment, and Autonomous Business OS. Luma does not copy their implementation; the ideas are independently implemented around Luma's existing evidence-first, client-control model.
+
+
+## Production control loop
+
+Provider execution now follows a single governed path:
+
+`request → identity → rate limit → policy → approval → secret retrieval/refresh → provider adapter → audit receipt → outcome`
+
+Supported live runtime adapters include Google Calendar, Microsoft Outlook Calendar, Calendly, HubSpot, SMTP email, and Twilio SMS. OAuth credentials are referenced from the secret backend, access tokens are refreshed near expiry, and rotated refresh tokens are persisted back to the secret store.
+
+Provider connections expose health state and a failed provider action moves the integration into an error state until it recovers.
+
+### Outcome optimization
+
+Client metric snapshots can automatically generate blueprint optimization proposals. Luma does **not** silently mutate active delivery behavior:
+
+`metrics → pattern detection → optimization proposal → human approval → blueprint version`
+
+This preserves client control while allowing successful delivery patterns to become reusable operating knowledge.
+
+### Distributed limits
+
+The API uses PostgreSQL-backed fixed-window buckets so multiple API replicas share rate-limit state. Authentication and OAuth callbacks have tighter limits than ordinary authenticated API traffic. Production deployments can configure limits with `LUMA_RATE_LIMIT_*` and choose fail-closed behavior.
+
+### Secret infrastructure
+
+A self-hosted Infisical Docker Compose bundle lives under `infrastructure/infisical/`. Luma stores only secret references in PostgreSQL; provider OAuth tokens belong in Infisical. Infisical's official self-hosting architecture uses the application server, PostgreSQL, Redis, and a migration job. citeturn2search0turn2search1
