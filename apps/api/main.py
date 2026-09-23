@@ -3054,7 +3054,13 @@ def agent_gateway_authorize(payload: dict):
     if not name: raise HTTPException(status_code=400,detail="tool is required")
     try: tool=resolve_agent_tool(name)
     except KeyError: raise HTTPException(status_code=404,detail="Unknown agent tool")
-    decision=evaluate_action(tool["scope"],tools=payload.get("allowed_scopes") or [],
+    allowed=payload.get("allowed_scopes")
+    if not allowed and payload.get("agent_name"):
+        from agent_layer import agent_policy
+        try: allowed=agent_policy(payload["agent_name"])["agent"]["tools"]
+        except ValueError: allowed=[]
+    allowed=allowed or []
+    decision=evaluate_action(tool["scope"],tools=allowed,
                              approval_required=bool(payload.get("approval_required",True)),
                              approved=bool(payload.get("approved")),
                              spent=float(payload.get("spent_usd") or 0),
