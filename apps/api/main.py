@@ -3,7 +3,7 @@ import json
 import csv
 import io
 from datetime import date
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 from fastapi.responses import FileResponse
@@ -36,7 +36,7 @@ from checkpoints import checkpoint_state
 from agent_gateway import catalog as agent_tool_catalog, resolve as resolve_agent_tool
 from provider_runtime import execute_integration, provider_status
 from blueprint_optimizer import propose
-from voice import voice_capabilities, disclosure_text, twilio_gather_twiml, twilio_stream_twiml, validate_twilio_signature, VOICE_MODES
+from voice import voice_capabilities, disclosure_text, twilio_gather_twiml, twilio_stream_twiml, validate_twilio_signature, realtime_bridge, VOICE_MODES
 
 app = FastAPI(title="Luma API", version="0.8.0")
 
@@ -3382,6 +3382,20 @@ def charge_agent_budget(payload: dict):
               (payload["agent_name"],payload.get("project_id"),payload.get("workflow_run_id"),
                payload.get("agent_run_id"),amount,payload.get("category","model")))
             return {"charge":cur.fetchone(),"spent_usd":spent+amount,"budget_usd":budget}
+
+
+@app.websocket("/voice/stream")
+async def voice_stream(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        await realtime_bridge(websocket, os.getenv("LUMA_VOICE_PUBLIC_URL"))
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
 
 
 @app.post("/voice/test-call")
