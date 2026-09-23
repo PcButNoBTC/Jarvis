@@ -640,3 +640,27 @@ See SECURITY.md for the security model. GitHub recommends repository security co
 - .env.example — configuration reference
 
 **Product promise:** evidence, clarity, human control, measurable outcomes.
+
+## Optional automated voice
+
+Voice is an optional interface, not a required client workflow. Clients can do everything through email and the portal.
+
+Current voice control-plane capabilities include:
+- AI disclosure and natural-conversation policy
+- Twilio inbound calls and bidirectional media-stream bridge
+- operator-approved test calls to custom E.164 numbers
+- Twilio signature validation and call-status persistence
+- interruption/barge-in bridge handling
+- communication-policy and do-not-call primitives
+- maximum call-duration metadata and governed outbound calling
+
+Example operator test:
+
+```http
+POST /voice/test-call
+Content-Type: application/json
+
+{"to":"+15551234567","approved":true}
+```
+
+A real production voice rollout still requires the operator's Twilio account, public HTTPS/WSS endpoints, realtime speech credentials, and live provider validation. Luma does not claim a voice integration is production-ready merely because the code path exists.
