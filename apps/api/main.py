@@ -3384,6 +3384,47 @@ def charge_agent_budget(payload: dict):
             return {"charge":cur.fetchone(),"spent_usd":spent+amount,"budget_usd":budget}
 
 
+@app.post("/voice/test-call")
+def voice_test_call(payload: dict, request: Request):
+    """Place a single operator-approved test call to any E.164 destination."""
+    principal=request.state.principal
+    if principal.get("role") not in {"owner","admin","operator"}:
+        raise HTTPException(status_code=403,detail="Operator approval required")
+    to=(payload.get("to") or "").strip()
+    if not to:
+        raise HTTPException(status_code=400,detail="to is required in E.164 format")
+    if payload.get("approved") is not True:
+        raise HTTPException(status_code=400,detail="Explicit approved=true is required")
+    decision=evaluate_action(
+        "place_call",
+        tools=["voice"],
+        approval_required=True,
+        approved=True,
+        spent=0,
+        budget=0,
+        estimated_cost=float(payload.get("estimated_cost") or 0),
+    )
+    if not decision.allowed:
+        raise HTTPException(status_code=403,detail=decision.reason)
+    integration={
+        "provider":"twilio",
+        "secret_ref":payload.get("secret_ref") or os.getenv("LUMA_TWILIO_SECRET_REF"),
+    }
+    if not integration["secret_ref"]:
+        raise HTTPException(status_code=503,detail="Twilio secret reference is not configured")
+    try:
+        result=execute_integration(
+            integration,
+            "place_call",
+            {"to":to,"from":payload.get("from") or os.getenv("TWILIO_FROM_NUMBER"),
+             "url":payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL")}
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502,detail=f"Voice provider error: {type(exc).__name__}")
+    return {"provider_result":result.__dict__,"governance":decision.__dict__}
+
+
+
 # --- Optional Voice ---
 
 @app.get("/voice/capabilities")
