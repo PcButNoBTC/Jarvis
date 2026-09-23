@@ -182,7 +182,7 @@ class TwilioAdapter(ProviderAdapter):
                 return ProviderResponse("error",self.provider,capability,{},"Phone numbers must use E.164 format")
             try:
                 r=httpx.post(f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json",
-                             auth=(sid,token),data={"From":sender,"To":to,"Url":twiml_url},timeout=20)
+                             auth=(sid,token),data={"From":sender,"To":to,"Url":twiml_url,**({"StatusCallback":payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL"),"StatusCallbackEvent":["initiated","ringing","answered","completed"]} if (payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL")) else {})},timeout=20)
                 data=r.json() if r.content else {}
                 return ProviderResponse("ok" if r.is_success else "error",self.provider,capability,data,None if r.is_success else r.text)
             except Exception as exc:
