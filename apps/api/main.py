@@ -3148,6 +3148,34 @@ def create_blueprint_optimization(payload: dict):
                recommendation["delta"],json.dumps(recommendation)))
             return cur.fetchone()
 
+@app.post("/analytics/blueprint-optimizations/scan")
+def scan_blueprint_optimizations(payload: dict):
+    project_id=payload.get("project_id")
+    service=payload.get("service")
+    limit=max(1,min(int(payload.get("limit",100)),500))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            sql="""SELECT metric_name, MIN(value) AS before_value, MAX(value) AS after_value,
+                          MIN(source) AS source
+                   FROM client_metric_snapshots
+                   WHERE (%s IS NULL OR project_id=%s)
+                     AND captured_at >= now() - interval '90 days'
+                   GROUP BY metric_name
+                   HAVING COUNT(*) >= 2
+                   ORDER BY metric_name LIMIT %s"""
+            cur.execute(sql,(project_id,project_id,limit))
+            rows=cur.fetchall()
+            created=[]
+            for row in rows:
+                recommendation=propose(row["metric_name"],row["before_value"],row["after_value"],None,service,1)
+                cur.execute("""INSERT INTO blueprint_optimization_proposals
+                  (project_id,source_metric,before_value,after_value,delta,recommendation)
+                  VALUES (%s,%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+                  (project_id,row["metric_name"],row["before_value"],row["after_value"],
+                   recommendation["delta"],json.dumps(recommendation)))
+                created.append(cur.fetchone())
+            return {"created":created,"count":len(created),"automation":"proposal_only_until_approval"}
+
 @app.get("/analytics/blueprint-optimizations")
 def list_blueprint_optimizations(status: str|None=None):
     with get_conn() as conn:
