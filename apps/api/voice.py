@@ -6,7 +6,7 @@ provider-neutral turn handling. A real-time speech provider can plug into the
 same session without changing client/project logic.
 """
 from __future__ import annotations
-import os, time, uuid
+import os, time, uuid, base64, hashlib, hmac
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -86,6 +86,19 @@ def twilio_gather_twiml(action_url: str, prompt: str | None = None, voice: str |
 def twilio_stream_twiml(stream_url: str) -> str:
     safe=stream_url.replace("&","&amp;").replace('"',"&quot;")
     return '<?xml version="1.0" encoding="UTF-8"?><Response><Connect><Stream url="'+safe+'"/></Connect></Response>'
+
+
+def validate_twilio_signature(url: str, params: dict[str, str], signature: str | None) -> bool:
+    """Validate Twilio's X-Twilio-Signature HMAC-SHA1 webhook signature."""
+    token=os.getenv("TWILIO_AUTH_TOKEN")
+    if not token:
+        return os.getenv("LUMA_VOICE_ALLOW_UNSIGNED_WEBHOOKS","false").lower()=="true"
+    if not signature:
+        return False
+    payload=url + "".join(k + str(params[k]) for k in sorted(params))
+    digest=hmac.new(token.encode(),payload.encode(),hashlib.sha1).digest()
+    expected=base64.b64encode(digest).decode()
+    return hmac.compare_digest(expected,signature)
 
 def voice_capabilities() -> dict[str, Any]:
     return {
