@@ -154,3 +154,13 @@ The control plane now includes a client-trust layer: evidence-based fit review, 
 - [ ] DB-backed distributed rate limiting
 - [ ] Provider actions fully wrapped by gateway/policy middleware
 - [ ] Automated outcome-to-blueprint optimization
+
+- [x] Governed provider execution gateway
+- [x] OAuth access-token expiry persistence
+- [x] OAuth refresh and refresh-token rotation persistence
+- [x] Provider health lifecycle
+- [x] Outcome-driven optimization proposal generation
+- [x] Human-gated blueprint approval/publishing
+- [x] Automated metric scanning for optimization candidates
+- [x] Distributed PostgreSQL-backed rate limiting for API/auth/OAuth
+- [x] Self-hosted Infisical deployment bundle
