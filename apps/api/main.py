@@ -36,7 +36,7 @@ from checkpoints import checkpoint_state
 from agent_gateway import catalog as agent_tool_catalog, resolve as resolve_agent_tool
 from provider_runtime import execute_integration, provider_status
 from blueprint_optimizer import propose
-from voice import voice_capabilities, disclosure_text, twilio_gather_twiml, twilio_stream_twiml, VOICE_MODES
+from voice import voice_capabilities, disclosure_text, twilio_gather_twiml, twilio_stream_twiml, validate_twilio_signature, VOICE_MODES
 
 app = FastAPI(title="Luma API", version="0.8.0")
 
@@ -3477,6 +3477,8 @@ async def twilio_incoming(request: Request):
     body=(await request.body()).decode("utf-8","replace")
     form={k:v[-1] for k,v in parse_qs(body).items()}
     call_sid=form.get("CallSid") or request.query_params.get("CallSid") or request.headers.get("X-Twilio-CallSid")
+    if not validate_twilio_signature(str(request.url), form, request.headers.get("X-Twilio-Signature")):
+        raise HTTPException(status_code=403, detail="Invalid Twilio webhook signature")
     if DATABASE_URL and call_sid:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -3501,6 +3503,8 @@ async def twilio_gather(request: Request):
     form={k:v[-1] for k,v in parse_qs(body).items()}
     transcript=(form.get("SpeechResult") or "").strip()
     call_sid=form.get("CallSid")
+    if not validate_twilio_signature(str(request.url), form, request.headers.get("X-Twilio-Signature")):
+        raise HTTPException(status_code=403, detail="Invalid Twilio webhook signature")
     if transcript and DATABASE_URL:
         with get_conn() as conn:
             with conn.cursor() as cur:
