@@ -33,7 +33,7 @@ INTEGRATION_PROVIDERS = {
         {"provider": "custom_form", "capabilities": ["receive_submission"]},
     ],
     "phone": [
-        {"provider": "twilio", "capabilities": ["voice", "sms", "call_forwarding", "health_check"]},
+        {"provider": "twilio", "capabilities": ["voice", "place_call", "sms", "call_forwarding", "health_check"]},
         {"provider": "telnyx", "capabilities": ["voice", "sms", "call_forwarding", "health_check"]},
         {"provider": "existing_phone_system", "capabilities": ["call_forwarding"]},
     ],
@@ -97,7 +97,7 @@ PROVIDER_SETUP = {
     "google_calendar": {"auth": "oauth", "credentials": ["oauth_client"], "steps": ["Connect Google account", "Grant calendar permissions", "Select calendar", "Run availability test"], "human_approval": True},
     "microsoft_outlook": {"auth": "oauth", "credentials": ["oauth_client"], "steps": ["Connect Microsoft account", "Grant calendar permissions", "Select calendar", "Run availability test"], "human_approval": True},
     "calendly": {"auth": "oauth", "credentials": ["oauth_client"], "steps": ["Connect Calendly account", "Grant requested permissions", "Select event type", "Run connection test"], "human_approval": True},
-    "twilio": {"auth": "api_credentials", "credentials": ["account_sid", "auth_token"], "steps": ["Connect Twilio", "Select or purchase number", "Configure webhook", "Run inbound/outbound test"], "human_approval": True},
+    "twilio": {"auth": "api_credentials", "credentials": ["account_sid", "auth_token"], "steps": ["Connect Twilio", "Select or purchase number", "Configure HTTPS/WSS voice endpoints", "Run signed inbound test", "Run operator-approved custom-number test call"], "human_approval": True},
     "telnyx": {"auth": "api_credentials", "credentials": ["api_key", "messaging_profile"], "steps": ["Connect Telnyx", "Select number", "Configure webhook", "Run inbound/outbound test"], "human_approval": True},
     "existing_phone_system": {"auth": "client_managed", "credentials": [], "steps": ["Provide forwarding/routing details", "Confirm escalation number", "Run call test"], "human_approval": True},
     "client_managed": {"auth": "client_managed", "credentials": [], "steps": ["Client completes provider setup", "Enter resulting booking URL or access details", "Run handoff test"], "human_approval": True},
