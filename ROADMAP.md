@@ -71,7 +71,7 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Calendar adapters (Google, Outlook, Calendly runtime/connect foundation)
 - [x] CRM adapter (HubSpot OAuth/connect foundation + runtime adapter)
 - [ ] Forms adapter
-- [ ] Phone/voice adapter
+- [x] Phone/voice adapter (Twilio runtime + realtime bridge foundation)
 - [ ] Analytics adapter
 - [ ] Payment provider adapter
 - [ ] Hosting adapters
@@ -186,13 +186,16 @@ The client must never need to join a call. Email and the client portal remain th
 - [x] Voice modes and escalation states
 - [x] Twilio inbound webhook/TwiML compatibility path
 - [x] Real-time media-stream contract
-- [ ] Realtime speech/model bridge with barge-in and low-latency turn taking
-- [ ] Production telephony signature validation and provider-account tests
-- [ ] Natural-voice provider selection and quality evaluation
+- [x] Realtime speech/model bridge foundation with interruption handling
+- [x] Production webhook signature validation
+- [x] Operator-approved custom-number test-call endpoint
+- [x] E.164 destination validation and call lifecycle persistence
+- [x] Do-not-call / preferred-channel policy primitives
+- [ ] Real provider-account test and realtime contract validation
+- [ ] Natural-voice quality evaluation against target latency/turn-taking
 - [ ] Conversation intelligence connected to governed tools
 - [ ] Automatic post-call email summary
 - [ ] Human escalation/transfer
-- [ ] Do-not-call and communication-preference enforcement at call ingress
 
 ### Voice quality bar
 
