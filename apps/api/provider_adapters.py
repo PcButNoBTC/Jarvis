@@ -1,8 +1,7 @@
-"""HTTP provider adapters for providers that use straightforward API tokens.
+"""Provider adapters for calendar, CRM, phone, and billing services.
 
-OAuth providers still require an authorization flow; these adapters do not fake
-OAuth. Credentials are read at runtime from environment variables and never
-written to project configuration.
+Adapters accept runtime credentials. Credentials should normally come from the
+secret backend and are never persisted in project configuration.
 """
 import os
 import httpx
@@ -10,86 +9,153 @@ from dataclasses import dataclass
 
 @dataclass
 class ProviderResponse:
-    status:str; provider:str; capability:str; data:dict; error:str|None=None
+    status: str
+    provider: str
+    capability: str
+    data: dict
+    error: str | None = None
 
 class ProviderAdapter:
-    provider="base"; capabilities=set()
-    def __init__(self, credentials=None): self.credentials=credentials or {}
+    provider = "base"
+    capabilities = set()
+    def __init__(self, credentials=None): self.credentials = credentials or {}
     def supports(self, capability): return capability in self.capabilities
-    def health_check(self): return ProviderResponse("not_implemented",self.provider,"health_check",{}, "Adapter requires provider implementation")
+    def health_check(self): return ProviderResponse("not_implemented", self.provider, "health_check", {}, "Adapter requires implementation")
     def execute(self, capability, payload=None):
-        if not self.supports(capability): return ProviderResponse("unsupported",self.provider,capability,{},"Capability is not supported")
-        return ProviderResponse("not_implemented",self.provider,capability,{},"Adapter requires provider implementation")
+        if not self.supports(capability): return ProviderResponse("unsupported", self.provider, capability, {}, "Capability is not supported")
+        return ProviderResponse("not_implemented", self.provider, capability, {}, "Adapter requires implementation")
 
 class TokenAdapter(ProviderAdapter):
-    base_url=""
-    token_env=""
-    def token(self): return self.credentials.get("token") or os.getenv(self.token_env)
+    base_url = ""
+    token_env = ""
+    def token(self): return self.credentials.get("access_token") or self.credentials.get("token") or os.getenv(self.token_env)
     def request(self, method, path, **kwargs):
-        token=self.token()
+        token = self.token()
         if not token: return None, "Missing provider token"
-        headers=kwargs.pop("headers",{})
-        headers["Authorization"]=f"Bearer {token}"
+        headers = kwargs.pop("headers", {})
+        headers["Authorization"] = f"Bearer {token}"
+        headers.setdefault("Accept", "application/json")
         try:
-            response=httpx.request(method,self.base_url+path,headers=headers,timeout=20,**kwargs)
-            data=response.json() if response.content else {}
-            return (response,data)
-        except Exception as exc: return None,str(exc)
+            response = httpx.request(method, self.base_url + path, headers=headers, timeout=20, **kwargs)
+            data = response.json() if response.content else {}
+            return response, data
+        except Exception as exc:
+            return None, str(exc)
+
+class GoogleCalendarAdapter(TokenAdapter):
+    provider = "google_calendar"
+    capabilities = {"health_check", "list_calendars", "read_availability", "create_event"}
+    base_url = "https://www.googleapis.com/calendar/v3"
+    token_env = "GOOGLE_ACCESS_TOKEN"
+    def health_check(self):
+        r, data = self.request("GET", "/users/me/calendarList?maxResults=1")
+        return ProviderResponse("ok" if r is not None and r.is_success else "error", self.provider, "health_check", data if isinstance(data, dict) else {}, None if r is not None and r.is_success else str(data))
+    def execute(self, capability, payload=None):
+        payload = payload or {}
+        if capability == "list_calendars":
+            r, data = self.request("GET", "/users/me/calendarList")
+        elif capability == "read_availability":
+            r, data = self.request("POST", "/freeBusy", json={
+                "timeMin": payload["time_min"], "timeMax": payload["time_max"],
+                "items": [{"id": payload.get("calendar_id", "primary")}],
+            })
+        elif capability == "create_event":
+            calendar_id = payload.get("calendar_id", "primary")
+            r, data = self.request("POST", f"/calendars/{calendar_id}/events", json=payload["event"])
+        else:
+            return super().execute(capability, payload)
+        if r is None: return ProviderResponse("error", self.provider, capability, {}, data)
+        return ProviderResponse("ok" if r.is_success else "error", self.provider, capability, data, None if r.is_success else r.text)
+
+class MicrosoftOutlookAdapter(TokenAdapter):
+    provider = "microsoft_outlook"
+    capabilities = {"health_check", "list_calendars", "read_availability", "create_event"}
+    base_url = "https://graph.microsoft.com/v1.0"
+    token_env = "MICROSOFT_ACCESS_TOKEN"
+    def health_check(self):
+        r, data = self.request("GET", "/me/calendars?$top=1")
+        return ProviderResponse("ok" if r is not None and r.is_success else "error", self.provider, "health_check", data if isinstance(data, dict) else {}, None if r is not None and r.is_success else str(data))
+    def execute(self, capability, payload=None):
+        payload = payload or {}
+        if capability == "list_calendars":
+            r, data = self.request("GET", "/me/calendars")
+        elif capability == "read_availability":
+            r, data = self.request("POST", "/me/calendar/getSchedule", json={
+                "schedules": payload["schedules"],
+                "startTime": {"dateTime": payload["start_time"], "timeZone": payload.get("time_zone", "UTC")},
+                "endTime": {"dateTime": payload["end_time"], "timeZone": payload.get("time_zone", "UTC")},
+                "availabilityViewInterval": payload.get("interval_minutes", 30),
+            })
+        elif capability == "create_event":
+            r, data = self.request("POST", "/me/events", json=payload["event"])
+        else:
+            return super().execute(capability, payload)
+        if r is None: return ProviderResponse("error", self.provider, capability, {}, data)
+        return ProviderResponse("ok" if r.is_success else "error", self.provider, capability, data, None if r.is_success else r.text)
 
 class HubSpotAdapter(TokenAdapter):
-    provider="hubspot"; capabilities={"health_check","create_contact","create_deal"}; base_url="https://api.hubapi.com"; token_env="HUBSPOT_ACCESS_TOKEN"
+    provider = "hubspot"; capabilities = {"health_check", "create_contact", "create_deal", "list_contacts"}; base_url = "https://api.hubapi.com"; token_env = "HUBSPOT_ACCESS_TOKEN"
     def health_check(self):
-        r,data=self.request("GET","/crm/v3/objects/contacts?limit=1")
-        if r is None: return ProviderResponse("error",self.provider,"health_check",{},data)
-        return ProviderResponse("ok" if r.is_success else "error",self.provider,"health_check",data,None if r.is_success else r.text)
-    def execute(self,capability,payload=None):
-        if capability=="create_contact":
-            r,data=self.request("POST","/crm/v3/objects/contacts",json={"properties":payload or {}})
-        elif capability=="create_deal":
-            r,data=self.request("POST","/crm/v3/objects/deals",json={"properties":payload or {}})
-        else: return super().execute(capability,payload)
-        if r is None:return ProviderResponse("error",self.provider,capability,{},data)
-        return ProviderResponse("ok" if r.is_success else "error",self.provider,capability,data,None if r.is_success else r.text)
+        r, data = self.request("GET", "/crm/v3/objects/contacts?limit=1")
+        return ProviderResponse("ok" if r is not None and r.is_success else "error", self.provider, "health_check", data if isinstance(data, dict) else {}, None if r is not None and r.is_success else str(data))
+    def execute(self, capability, payload=None):
+        payload = payload or {}
+        if capability == "create_contact":
+            r, data = self.request("POST", "/crm/v3/objects/contacts", json={"properties": payload})
+        elif capability == "create_deal":
+            r, data = self.request("POST", "/crm/v3/objects/deals", json={"properties": payload})
+        elif capability == "list_contacts":
+            r, data = self.request("GET", "/crm/v3/objects/contacts?limit=100")
+        else:
+            return super().execute(capability, payload)
+        if r is None: return ProviderResponse("error", self.provider, capability, {}, data)
+        return ProviderResponse("ok" if r.is_success else "error", self.provider, capability, data, None if r.is_success else r.text)
 
 class CalendlyAdapter(TokenAdapter):
-    provider="calendly"; capabilities={"health_check","read_availability","booking_link"}; base_url="https://api.calendly.com"; token_env="CALENDLY_ACCESS_TOKEN"
+    provider = "calendly"; capabilities = {"health_check", "booking_link", "list_event_types"}; base_url = "https://api.calendly.com"; token_env = "CALENDLY_ACCESS_TOKEN"
     def health_check(self):
-        r,data=self.request("GET","/users/me")
-        if r is None:return ProviderResponse("error",self.provider,"health_check",{},data)
-        return ProviderResponse("ok" if r.is_success else "error",self.provider,"health_check",data,None if r.is_success else r.text)
-    def execute(self,capability,payload=None):
-        if capability=="booking_link":
-            return ProviderResponse("ok",self.provider,capability,{"url":(payload or {}).get("url")},"")
-        return super().execute(capability,payload)
+        r, data = self.request("GET", "/users/me")
+        return ProviderResponse("ok" if r is not None and r.is_success else "error", self.provider, "health_check", data if isinstance(data, dict) else {}, None if r is not None and r.is_success else str(data))
+    def execute(self, capability, payload=None):
+        if capability == "booking_link":
+            return ProviderResponse("ok", self.provider, capability, {"url": (payload or {}).get("url")})
+        if capability == "list_event_types":
+            r, data = self.request("GET", "/event_types?active=true&count=100")
+            if r is None: return ProviderResponse("error", self.provider, capability, {}, data)
+            return ProviderResponse("ok" if r.is_success else "error", self.provider, capability, data, None if r.is_success else r.text)
+        return super().execute(capability, payload)
 
 class TwilioAdapter(ProviderAdapter):
-    provider="twilio"; capabilities={"health_check","call_forwarding","voice","sms"}
-    def _auth(self):
-        sid=os.getenv("TWILIO_ACCOUNT_SID"); token=os.getenv("TWILIO_AUTH_TOKEN")
-        return sid,token
+    provider = "twilio"; capabilities = {"health_check", "call_forwarding", "voice", "sms"}
     def health_check(self):
-        sid,token=self._auth()
-        if not sid or not token:return ProviderResponse("error",self.provider,"health_check",{},"Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN")
+        sid = os.getenv("TWILIO_ACCOUNT_SID"); token = os.getenv("TWILIO_AUTH_TOKEN")
+        if not sid or not token: return ProviderResponse("error", self.provider, "health_check", {}, "Missing Twilio credentials")
         try:
-            r=httpx.get(f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json",auth=(sid,token),timeout=20)
-            return ProviderResponse("ok" if r.is_success else "error",self.provider,"health_check",r.json() if r.content else {},None if r.is_success else r.text)
-        except Exception as exc:return ProviderResponse("error",self.provider,"health_check",{},str(exc))
+            r = httpx.get(f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json", auth=(sid, token), timeout=20)
+            return ProviderResponse("ok" if r.is_success else "error", self.provider, "health_check", r.json() if r.content else {}, None if r.is_success else r.text)
+        except Exception as exc: return ProviderResponse("error", self.provider, "health_check", {}, str(exc))
 
 class StripeAdapter(TokenAdapter):
-    provider="stripe"; capabilities={"health_check","create_invoice"}; base_url="https://api.stripe.com/v1"; token_env="STRIPE_SECRET_KEY"
+    provider = "stripe"; capabilities = {"health_check", "create_invoice"}; base_url = "https://api.stripe.com/v1"; token_env = "STRIPE_SECRET_KEY"
     def health_check(self):
-        r,data=self.request("GET","/balance")
-        if r is None:return ProviderResponse("error",self.provider,"health_check",{},data)
-        return ProviderResponse("ok" if r.is_success else "error",self.provider,"health_check",data,None if r.is_success else r.text)
+        r, data = self.request("GET", "/balance")
+        return ProviderResponse("ok" if r is not None and r.is_success else "error", self.provider, "health_check", data if isinstance(data, dict) else {}, None if r is not None and r.is_success else str(data))
 
 class ClientManagedAdapter(ProviderAdapter):
-    provider="client_managed"; capabilities={"handoff_only"}
-    def execute(self,capability,payload=None): return ProviderResponse("handoff_required",self.provider,capability,payload or {},"Client must complete this provider action")
+    provider = "client_managed"; capabilities = {"handoff_only"}
+    def execute(self, capability, payload=None): return ProviderResponse("handoff_required", self.provider, capability, payload or {}, "Client must complete this provider action")
 
-ADAPTERS={"hubspot":HubSpotAdapter,"calendly":CalendlyAdapter,"twilio":TwilioAdapter,"stripe":StripeAdapter,"client_managed":ClientManagedAdapter}
-
-def get_adapter(provider,credentials=None):
-    cls=ADAPTERS.get(provider,ProviderAdapter)
-    adapter=cls(credentials)
-    if cls is ProviderAdapter: adapter.provider=provider
+ADAPTERS = {
+    "google_calendar": GoogleCalendarAdapter,
+    "microsoft_outlook": MicrosoftOutlookAdapter,
+    "hubspot": HubSpotAdapter,
+    "calendly": CalendlyAdapter,
+    "twilio": TwilioAdapter,
+    "stripe": StripeAdapter,
+    "client_managed": ClientManagedAdapter,
+}
+def get_adapter(provider, credentials=None):
+    cls = ADAPTERS.get(provider, ProviderAdapter)
+    adapter = cls(credentials)
+    if cls is ProviderAdapter: adapter.provider = provider
     return adapter
