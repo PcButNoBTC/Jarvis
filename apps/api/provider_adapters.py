@@ -160,12 +160,27 @@ class CalendlyAdapter(TokenAdapter):
 class TwilioAdapter(ProviderAdapter):
     provider = "twilio"; capabilities = {"health_check", "call_forwarding", "voice", "sms"}
     def health_check(self):
-        sid = os.getenv("TWILIO_ACCOUNT_SID"); token = os.getenv("TWILIO_AUTH_TOKEN")
-        if not sid or not token: return ProviderResponse("error", self.provider, "health_check", {}, "Missing Twilio credentials")
+        sid=self.credentials.get("account_sid") or os.getenv("TWILIO_ACCOUNT_SID")
+        token=self.credentials.get("auth_token") or os.getenv("TWILIO_AUTH_TOKEN")
+        if not sid or not token: return ProviderResponse("error",self.provider,"health_check",{},"Missing Twilio credentials")
         try:
-            r = httpx.get(f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json", auth=(sid, token), timeout=20)
-            return ProviderResponse("ok" if r.is_success else "error", self.provider, "health_check", r.json() if r.content else {}, None if r.is_success else r.text)
-        except Exception as exc: return ProviderResponse("error", self.provider, "health_check", {}, str(exc))
+            r=httpx.get(f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json",auth=(sid,token),timeout=20)
+            return ProviderResponse("ok" if r.is_success else "error",self.provider,"health_check",r.json() if r.content else {},None if r.is_success else r.text)
+        except Exception as exc: return ProviderResponse("error",self.provider,"health_check",{},type(exc).__name__)
+    def execute(self, capability, payload=None):
+        if capability!="sms": return super().execute(capability,payload)
+        payload=payload or {}
+        sid=self.credentials.get("account_sid") or os.getenv("TWILIO_ACCOUNT_SID")
+        token=self.credentials.get("auth_token") or os.getenv("TWILIO_AUTH_TOKEN")
+        sender=payload.get("from") or self.credentials.get("from")
+        if not sid or not token or not sender or not payload.get("to") or not payload.get("body"):
+            return ProviderResponse("error",self.provider,capability,{},"Missing Twilio SMS fields")
+        try:
+            r=httpx.post(f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+                         auth=(sid,token),data={"From":sender,"To":payload["to"],"Body":payload["body"]},timeout=20)
+            data=r.json() if r.content else {}
+            return ProviderResponse("ok" if r.is_success else "error",self.provider,capability,data,None if r.is_success else r.text)
+        except Exception as exc: return ProviderResponse("error",self.provider,capability,{},type(exc).__name__)
 
 class StripeAdapter(TokenAdapter):
     provider = "stripe"; capabilities = {"health_check", "create_invoice"}; base_url = "https://api.stripe.com/v1"; token_env = "STRIPE_SECRET_KEY"
