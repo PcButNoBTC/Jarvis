@@ -12,6 +12,10 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Configuration-aware QA contract endpoint
 
 ## Phase 2 — Opportunity and sales intelligence
+- [x] Evidence-first client-respect fit assessment
+- [x] Why-this / why-not / alternatives fields
+- [x] No-pressure outreach preference and suppression controls
+- [x] Client outcome tracking before expansion
 - [x] Service-specific opportunity mapping
 - [x] Numeric confidence
 - [x] Evidence ledger
@@ -83,6 +87,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [ ] Rate limiting
 
 ## Phase 9 — Client portal
+- [x] Client AI-disclosure and communication preferences
+- [x] Client data-ownership messaging
 - [x] Scoped project read view
 - [x] Milestone visibility
 - [x] Requirements submission via project configuration API
@@ -92,6 +98,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [ ] Client messaging
 
 ## Phase 10 — Agent layer
+- [x] Trust-first operating policy available to agents
+- [x] Expansion gated on demonstrated client value
 - [x] Agent-run persistence
 - [x] Tool/control-plane foundations
 - [x] Research agent registry/governance
@@ -102,6 +110,14 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Launch agent registry/governance
 - [x] Per-agent budgets and tool/approval policy records
 - [x] Agent evaluation
+
+## Phase 11 — Regional growth
+- [x] Regional playbook data model
+- [x] Regional playbook API
+- [x] Trust-first dashboard surface
+- [ ] Pilot metrics and referral tracking
+- [ ] Region-specific outreach rate limits
+- [ ] Automated client-success reporting
 
 ## Definition of Strong MVP
 
@@ -117,4 +133,4 @@ Every module must have:
 
 ## Remaining production dependencies
 
-The control plane is now complete enough to run the operating loop safely, but live third-party execution is intentionally separate. The remaining work is provider adapter implementation and credential infrastructure: OAuth/API-key exchange, secret-manager integration, real calendar/CRM/email/phone/forms/payment/hosting calls, cron parsing/event delivery, and production authentication/RBAC. The registry, project configuration, approval history, secret references, and human gates are already in place so those adapters can be added without changing the project model.
+The control plane now includes a client-trust layer: evidence-based fit review, outreach suppression, client preferences, outcome tracking, and regional playbooks. Live third-party execution is intentionally separate. The remaining work is provider adapter implementation and credential infrastructure: OAuth/API-key exchange, secret-manager integration, real calendar/CRM/email/phone/forms/payment/hosting calls, cron parsing/event delivery, and production authentication/RBAC. The registry, project configuration, approval history, secret references, and human gates are already in place so those adapters can be added without changing the project model.
