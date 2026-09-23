@@ -2616,6 +2616,12 @@ def execute_provider_action(integration_id: str, payload: dict, request: Request
         result=execute_integration(integration,capability,payload.get("input") or {})
     except Exception as exc:
         result={"status":"error","provider":integration["provider"],"error":type(exc).__name__}
+    result_status=result.status if hasattr(result,"status") else result.get("status","unknown")
+    if result_status=="error":
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE integration_connections SET status='error', metadata=metadata || %s::jsonb WHERE id=%s",
+                            (json.dumps({"last_provider_error":result.error if hasattr(result,"error") else result.get("error")}),integration_id))
     with get_conn() as conn:
         with conn.cursor() as cur:
             status=result.status if hasattr(result,"status") else result.get("status","unknown")
