@@ -20,8 +20,16 @@ def _decode(value):
 def load_credentials(integration):
     secret_ref=integration.get("secret_ref")
     if not secret_ref:
-        raise RuntimeError("Integration has no secret reference")
-    credentials=_decode(backend().get(secret_ref))
+        provider=integration.get("provider")
+        if provider=="twilio":
+            import os
+            credentials={"account_sid":os.getenv("TWILIO_ACCOUNT_SID"),
+                         "auth_token":os.getenv("TWILIO_AUTH_TOKEN"),
+                         "from":os.getenv("TWILIO_FROM_NUMBER")}
+        else:
+            raise RuntimeError("Integration has no secret reference")
+    else:
+        credentials=_decode(backend().get(secret_ref))
     if not credentials.get("access_token") and credentials.get("token"):
         credentials["access_token"]=credentials["token"]
     expires_at=credentials.get("expires_at")
