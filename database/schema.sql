@@ -637,3 +637,13 @@ CREATE TABLE IF NOT EXISTS regional_playbooks (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_regional_playbooks_status ON regional_playbooks(status);
+
+
+-- OAuth connections store metadata and a reference to the external secret manager,
+-- never raw access or refresh tokens.
+ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS secret_ref TEXT;
+ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS scopes JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS provider_account_id TEXT;
+ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS last_health_check_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_integration_connections_secret_ref ON integration_connections(secret_ref);
