@@ -2569,6 +2569,48 @@ def portal_revision(project_id: str, token: str, payload: dict):
             return revision
 
 
+@app.post("/integrations/{integration_id}/execute")
+def execute_provider_action(integration_id: str, payload: dict, request: Request):
+    capability=payload.get("capability")
+    if not capability: raise HTTPException(status_code=400,detail="capability is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM integration_connections WHERE id=%s",(integration_id,))
+            integration=cur.fetchone()
+    if not integration: raise HTTPException(status_code=404,detail="Integration not found")
+    action_map={"health_check":"read","list_calendars":"read","read_availability":"read","list_contacts":"read",
+                "list_event_types":"read","booking_link":"draft","create_contact":"write_crm","create_deal":"write_crm",
+                "create_event":"create_event","send_message":"send_message","create_invoice":"charge_payment"}
+    action=action_map.get(capability,"write_crm")
+    principal=request.state.principal
+    if principal.get("role") in {"owner","admin","operator"}:
+        allowed_scopes=["read","draft","write_crm","create_event","send_message","charge_payment","deploy"]
+    elif principal.get("role")=="client":
+        allowed_scopes=["read"]
+    else:
+        from agent_layer import agent_policy
+        try: allowed_scopes=agent_policy(payload.get("agent_name","research"))["agent"]["tools"]
+        except ValueError: allowed_scopes=["read"]
+    decision=evaluate_action(action,tools=allowed_scopes,
+                             approval_required=action in {"create_event","send_message","charge_payment","deploy"},
+                             approved=payload.get("approved") is True,
+                             estimated_cost=float(payload.get("estimated_cost") or 0),
+                             spent=float(payload.get("spent_usd") or 0),
+                             budget=float(payload.get("budget_usd") or 0))
+    if decision.decision!="allow": return {"executed":False,"decision":decision.__dict__}
+    try:
+        result=execute_integration(integration,capability,payload.get("input") or {})
+    except Exception as exc:
+        result={"status":"error","provider":integration["provider"],"error":type(exc).__name__}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            status=result.status if hasattr(result,"status") else result.get("status","unknown")
+            cur.execute("""INSERT INTO audit_log(actor_type,actor_id,action,entity_type,entity_id,metadata)
+                           VALUES (%s,%s,'provider_action','integration_connection',%s,%s::jsonb)""",
+                        (principal.get("role","agent"),principal.get("sub"),integration_id,
+                         json.dumps({"capability":capability,"status":status})))
+    return {"executed":True,"decision":decision.__dict__,"result":result.__dict__ if hasattr(result,"__dict__") else result}
+
 @app.post("/integrations/{integration_id}/verify")
 def verify_integration(integration_id: str, payload: dict):
     if payload.get("approved") is not True:
