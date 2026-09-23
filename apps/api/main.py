@@ -915,6 +915,32 @@ def create_outreach_draft(opportunity_id: str):
                     detail="Business has no email — add an email before drafting outreach",
                 )
 
+            cur.execute(
+                """SELECT status, contact_count FROM outreach_preferences WHERE business_id=%s""",
+                (opportunity["business_id"],),
+            )
+            preference = cur.fetchone() or {"status": "normal", "contact_count": 0}
+            eligibility = outreach_disposition(preference["status"], preference["contact_count"])
+            if eligibility != "allow":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": "Outreach is paused for this business.",
+                        "reason": preference["status"],
+                        "eligibility": eligibility,
+                    },
+                )
+            if opportunity.get("fit_disposition") == "suppress":
+                raise HTTPException(
+                    status_code=409,
+                    detail="This opportunity is suppressed by the client-respect policy. Gather new evidence before outreach.",
+                )
+            if opportunity.get("fit_disposition") != "allow":
+                raise HTTPException(
+                    status_code=409,
+                    detail="This opportunity needs human fit review before outreach.",
+                )
+
             sequence = build_outreach_sequence(opportunity)
             created = []
             for touch in sequence["touches"]:
