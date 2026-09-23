@@ -41,20 +41,30 @@ app = FastAPI(title="Luma API", version="0.8.0")
 
 @app.middleware("http")
 async def api_key_guard(request: Request, call_next):
-    if request.url.path in PUBLIC_PATHS:
+    path=request.url.path
+    if path in PUBLIC_PATHS and path not in {"/auth/login","/integrations/oauth"}:
         return await call_next(request)
+
     api_key=request.headers.get("X-Luma-Key")
     authorization=request.headers.get("Authorization","")
     bearer=authorization[7:] if authorization.lower().startswith("bearer ") else None
     principal=authenticate(api_key,bearer)
-    if not principal:
+    if not principal and path not in {"/auth/login"} and not path.startswith("/integrations/oauth/"):
         return JSONResponse(status_code=401, content={"detail":"Authentication required"})
-    request.state.principal=principal
-    if DATABASE_URL:
+
+    # PostgreSQL-backed fixed windows are shared by every API replica.
+    # The limiter is route-aware for public auth/OAuth endpoints and identity-aware
+    # after authentication. Forwarded headers are intentionally ignored here.
+    if DATABASE_URL and path != "/health":
+        import time
+        from datetime import datetime, timezone, timedelta
+        is_auth=path=="/auth/login"
+        is_oauth=path.startswith("/integrations/oauth/")
+        limit=int(os.getenv("LUMA_RATE_LIMIT_AUTH_PER_MINUTE" if is_auth else "LUMA_RATE_LIMIT_OAUTH_PER_MINUTE" if is_oauth else "LUMA_RATE_LIMIT_PER_MINUTE","10" if is_auth else "30" if is_oauth else "120"))
+        identity=(principal or {}).get("sub") or (request.client.host if request.client else "unknown")
+        bucket_key=f"{path.split('/')[1]}:{identity}:{request.client.host if request.client else 'unknown'}"
+        bucket_start=datetime.fromtimestamp(int(time.time())//60*60,tz=timezone.utc)
         try:
-            from datetime import datetime, timezone, timedelta
-            bucket_start=datetime.now(timezone.utc).replace(second=0,microsecond=0)
-            bucket_key=f"{principal.get('sub','unknown')}:{request.client.host if request.client else 'unknown'}"
             with get_conn() as conn:
                 with conn.cursor() as cur:
                     cur.execute("""INSERT INTO security_rate_limits(bucket_key,window_start,request_count)
@@ -63,13 +73,17 @@ async def api_key_guard(request: Request, call_next):
                                    DO UPDATE SET request_count=security_rate_limits.request_count+1
                                    RETURNING request_count""",(bucket_key,bucket_start))
                     count=cur.fetchone()["request_count"]
-                    cur.execute("DELETE FROM security_rate_limits WHERE window_start < %s",(bucket_start-timedelta(minutes=5),))
-                    if count > 120:
-                        return JSONResponse(status_code=429,content={"detail":"Rate limit exceeded"})
+                    cur.execute("DELETE FROM security_rate_limits WHERE window_start < %s",
+                                (bucket_start-timedelta(minutes=10),))
+                    if count > limit:
+                        return JSONResponse(status_code=429,content={"detail":"Rate limit exceeded","retry_after_seconds":60})
         except Exception:
-            # Rate limiting must never take the API down if the limiter is unavailable.
-            pass
+            if os.getenv("LUMA_RATE_LIMIT_FAIL_CLOSED","true").lower()=="true":
+                return JSONResponse(status_code=503,content={"detail":"Rate limiter unavailable"})
+    if principal:
+        request.state.principal=principal
     return await call_next(request)
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
