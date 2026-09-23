@@ -36,3 +36,17 @@ def test_unsigned_webhook_is_rejected_by_default(monkeypatch):
     monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
     monkeypatch.delenv("LUMA_VOICE_ALLOW_UNSIGNED_WEBHOOKS", raising=False)
     assert not validate_twilio_signature("https://example.com/voice", {}, None)
+
+
+from apps.api.voice import communication_policy, validate_destination
+
+def test_voice_communication_policy_respects_dnc():
+    policy = communication_policy(do_not_call=True, preferred_channel="email")
+    assert policy["voice_allowed"] is False
+    assert policy["preferred_channel"] == "email"
+
+def test_voice_destination_requires_e164():
+    assert validate_destination("+15551234567") == "+15551234567"
+    import pytest
+    with pytest.raises(ValueError):
+        validate_destination("555-123-4567")
