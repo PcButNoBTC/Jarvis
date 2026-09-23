@@ -538,13 +538,13 @@ The design principle is **evidence → policy → controlled action → receipt 
 This architecture is informed by public research into projects such as Orionfold Relay, Comp AI CRM, JamJet, BoundFlow, SimplerDevelopment, and Autonomous Business OS. Luma does not copy their implementation; the ideas are independently implemented around Luma's existing evidence-first, client-control model.
 
 
-## Production control loop
+## Production control loop (current)
 
 Provider execution now follows a single governed path:
 
 `request → identity → rate limit → policy → approval → secret retrieval/refresh → provider adapter → audit receipt → outcome`
 
-Supported live runtime adapters include Google Calendar, Microsoft Outlook Calendar, Calendly, HubSpot, SMTP email, and Twilio SMS. OAuth credentials are referenced from the secret backend, access tokens are refreshed near expiry, and rotated refresh tokens are persisted back to the secret store.
+Supported runtime adapters include Google Calendar, Microsoft Outlook Calendar, Calendly, HubSpot, SMTP email, and Twilio SMS. Selected providers have live token-aware execution paths; provider provisioning and external-account creation remain explicit dependencies. OAuth credentials are referenced from the secret backend, access tokens are refreshed near expiry, and rotated refresh tokens are persisted back to the secret store.
 
 Provider connections expose health state and a failed provider action moves the integration into an error state until it recovers.
 
@@ -558,8 +558,85 @@ This preserves client control while allowing successful delivery patterns to bec
 
 ### Distributed limits
 
-The API uses PostgreSQL-backed fixed-window buckets so multiple API replicas share rate-limit state. Authentication and OAuth callbacks have tighter limits than ordinary authenticated API traffic. Production deployments can configure limits with `LUMA_RATE_LIMIT_*` and choose fail-closed behavior.
+The API uses PostgreSQL-backed fixed-window buckets so multiple API replicas share rate-limit state. This is a shared application-layer limiter, not a substitute for an edge/WAF limiter. Authentication and OAuth callbacks have tighter limits than ordinary authenticated API traffic. Production deployments can configure limits with `LUMA_RATE_LIMIT_*` and choose fail-closed behavior.
 
 ### Secret infrastructure
 
 A self-hosted Infisical Docker Compose bundle lives under `infrastructure/infisical/`. Luma stores only secret references in PostgreSQL; provider OAuth tokens belong in Infisical. Infisical's official self-hosting architecture uses the application server, PostgreSQL, Redis, and a migration job.
+
+## Luma capability matrix
+
+| Domain | Capabilities | Production boundary |
+|---|---|---|
+| Discovery | Prospect ingest, deduplication, research queue, source metadata | Source terms and lawful use still apply |
+| Research | Website observations, evidence ledger, research reports, confidence, rationale | Observations are not proof of business impact |
+| Qualification | Multi-service mapping, fit assessment, why-this/why-not, alternatives | Human judgment remains available |
+| Sales | Call prep, client briefs, offers, proposal versions, follow-up | Outbound is approval-gated |
+| Client trust | Suppression, communication preferences, AI disclosure, data ownership, outcome tracking | No-pressure operating model |
+| Delivery | Requirements, project options, tasks, milestones, dependencies, revisions | Scope must be approved |
+| Build | Service blueprints and implementation artifacts | Universal autonomous software factory is not claimed |
+| QA | Service-specific validation and launch-readiness checks | Failed QA blocks normal launch path |
+| Launch | Approval, supported static deployment, monitoring, handoff | Credentials/DNS/provider access are explicit dependencies |
+| Integrations | Provider registry, OAuth, secret references, runtime adapters, health | Not every registry provider is a live executor |
+| Agents | Research/Sales/Project/Build/QA/Launch policies, tools, budgets, evaluations | Consequential tools require governance |
+| Automation | Workflows, checkpoints, retries, schedules, atomic claims | Event-driven orchestration remains future work |
+| Revenue | Billing, payments, recurring revenue, cost records, contribution | External payment execution is not universal |
+| Intelligence | Metric snapshots, client outcomes, optimization proposals, blueprint versions | Blueprint publication requires human approval |
+| Security | Auth, RBAC foundations, portal tokens, audit log, action receipts, rate limits, secret references | Enterprise hardening remains ongoing |
+| Growth | Regional playbooks, proven offers, client-success metrics | Expansion is gated by demonstrated value |
+
+## Provider execution status
+
+| Provider | Auth | Runtime actions | Refresh/health |
+|---|---|---|---|
+| Google Calendar | OAuth | Calendar list, availability, event creation | Token refresh + health path |
+| Microsoft Outlook | OAuth | Calendar list, schedule/availability, event creation | Token refresh + health path |
+| Calendly | OAuth + PKCE foundation | Event types, booking-link actions | Refresh rotation path + health |
+| HubSpot | OAuth | Contacts, deals, contact listing | Token-aware runtime + health |
+| SMTP | Credentials | Email send + health | Connection-level health |
+| Twilio | Credentials | SMS send + health | Connection-level health |
+| Stripe | Adapter foundation | Payment integration foundation | Full production flow remains future work |
+
+## Governance model
+
+Luma's consequential runtime path is:
+
+identity → distributed rate limit → tool scope → risk policy → approval → secret retrieval → provider adapter → audit → action receipt → outcome
+
+Agents do not receive unrestricted database or provider access. Provider adapters do not receive database access. Credentials are referenced through the secret backend.
+
+## Outcome learning
+
+Client outcomes and metric snapshots can feed a governed optimization loop:
+
+metric → baseline/current comparison → proposal → human approval → service blueprint version
+
+Published blueprint changes are reusable operating knowledge; they do not silently modify an active client project.
+
+## Production-readiness language
+
+README status labels mean:
+
+- **Ready** — implemented in the repository and represented in the control plane.
+- **Runtime adapter** — provider action code exists and is reachable through the runtime; live credentials and provider-account testing are still required.
+- **Foundation** — contracts/data model exist, but production execution is incomplete.
+- **Supported** — a bounded execution path exists with explicit configuration requirements.
+- **Not complete** — intentionally not represented as finished.
+
+Do not infer that a checked roadmap item means every third-party integration is production-provisioned. Live provider behavior must be exercised with real test accounts before deployment.
+
+## Security posture
+
+See SECURITY.md for the security model. GitHub recommends repository security controls including secret scanning, push protection, Dependabot alerts and code scanning for public repositories; Luma's repository documentation should be read alongside those GitHub controls.
+
+## Documentation map
+
+- docs/CAPABILITIES.md — capability inventory and maturity
+- docs/ARCHITECTURE.md — runtime/data-flow architecture
+- docs/INTEGRATIONS.md — provider and credential model
+- docs/OPERATIONS.md — self-hosted deployment and operational checklist
+- SECURITY.md — security boundaries and production hardening
+- ROADMAP.md — current implementation status
+- .env.example — configuration reference
+
+**Product promise:** evidence, clarity, human control, measurable outcomes.
