@@ -192,6 +192,65 @@ def ensure_delivery_schema():
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_login_at TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS idx_users_role_active ON users(role, active);
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS fit_score NUMERIC(5,2);
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS fit_disposition TEXT NOT NULL DEFAULT 'review';
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS why_this TEXT;
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS why_not JSONB NOT NULL DEFAULT '[]';
+    ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS alternatives JSONB NOT NULL DEFAULT '[]';
+    CREATE INDEX IF NOT EXISTS idx_opportunities_fit ON opportunities(fit_disposition, fit_score DESC);
+
+    CREATE TABLE IF NOT EXISTS outreach_preferences (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      business_id UUID UNIQUE NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'normal',
+      reason TEXT,
+      source TEXT NOT NULL DEFAULT 'operator',
+      last_contacted_at TIMESTAMPTZ,
+      contact_count INT NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_outreach_preferences_status ON outreach_preferences(status);
+
+    CREATE TABLE IF NOT EXISTS client_preferences (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      client_id UUID UNIQUE NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+      ai_disclosure BOOLEAN NOT NULL DEFAULT true,
+      data_ownership_note TEXT NOT NULL DEFAULT 'Client retains ownership of business data and deliverables, subject to the engagement agreement.',
+      preferred_contact_channel TEXT NOT NULL DEFAULT 'email',
+      communication_frequency TEXT NOT NULL DEFAULT 'normal',
+      notes TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS client_outcomes (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
+      project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+      outcome_type TEXT NOT NULL,
+      baseline JSONB NOT NULL DEFAULT '{}',
+      current_value JSONB NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'tracking',
+      client_confirmed BOOLEAN NOT NULL DEFAULT false,
+      notes TEXT,
+      measured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_client_outcomes_project ON client_outcomes(project_id, measured_at DESC);
+
+    CREATE TABLE IF NOT EXISTS regional_playbooks (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      region_key TEXT UNIQUE NOT NULL,
+      display_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pilot',
+      notes TEXT,
+      proven_offers JSONB NOT NULL DEFAULT '[]',
+      industry_patterns JSONB NOT NULL DEFAULT '[]',
+      outreach_metrics JSONB NOT NULL DEFAULT '{}',
+      client_success_metrics JSONB NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_regional_playbooks_status ON regional_playbooks(status);
+
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
