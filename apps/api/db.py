@@ -307,6 +307,19 @@ def ensure_delivery_schema():
     ALTER TABLE agent_policies ADD COLUMN IF NOT EXISTS max_tool_calls INT NOT NULL DEFAULT 100;
     ALTER TABLE agent_policies ADD COLUMN IF NOT EXISTS max_tokens INT;
     ALTER TABLE agent_policies ADD COLUMN IF NOT EXISTS risk_policy JSONB NOT NULL DEFAULT '{}';
+    CREATE TABLE IF NOT EXISTS agent_trajectory_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), agent_run_id UUID REFERENCES agent_runs(id) ON DELETE CASCADE,
+      sequence INT NOT NULL, event_type TEXT NOT NULL, action TEXT, input JSONB NOT NULL DEFAULT '{}',
+      output JSONB NOT NULL DEFAULT '{}', decision TEXT, latency_ms INT, cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_trajectory_run ON agent_trajectory_events(agent_run_id, sequence);
+    CREATE TABLE IF NOT EXISTS security_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), actor_type TEXT, actor_id UUID,
+      event_type TEXT NOT NULL, severity TEXT NOT NULL DEFAULT 'info', entity_type TEXT, entity_id UUID,
+      metadata JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
