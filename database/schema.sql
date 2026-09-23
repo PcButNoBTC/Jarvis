@@ -829,3 +829,15 @@ CREATE TABLE IF NOT EXISTS voice_turns (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_voice_turns_session ON voice_turns(session_id, sequence);
+
+-- Voice provider lifecycle and compliance metadata.
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS provider TEXT;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS provider_call_id TEXT;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS caller_consent BOOLEAN;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS do_not_call BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS preferred_channel TEXT NOT NULL DEFAULT 'email';
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS last_provider_status TEXT;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS post_call_summary_sent BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS max_duration_seconds INT NOT NULL DEFAULT 1800;
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_provider_call ON voice_sessions(provider, provider_call_id);
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_dnc ON voice_sessions(do_not_call, started_at DESC);
