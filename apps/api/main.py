@@ -118,7 +118,7 @@ class ProjectOptionUpdate(BaseModel):
 
 @app.get("/")
 def root():
-    return {"name": "Luma", "version": "0.7.0", "status": "running"}
+    return {"name": "Luma", "version": "0.8.0", "status": "running"}
 
 
 @app.get("/health")
