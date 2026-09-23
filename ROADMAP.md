@@ -68,8 +68,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Provider registry
 - [x] Connection records
 - [ ] Email adapter
-- [ ] Calendar adapter
-- [ ] CRM adapter
+- [~] Calendar adapters (Google, Outlook, Calendly OAuth/connect foundation + runtime adapters)
+- [~] CRM adapter (HubSpot OAuth/connect foundation + runtime adapter)
 - [ ] Forms adapter
 - [ ] Phone/voice adapter
 - [ ] Analytics adapter
@@ -82,7 +82,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Audit-log data model
 - [x] User authentication
 - [x] Roles/permissions
-- [x] Secret-reference abstraction (external secret manager still required)
+- [x] Secret-reference abstraction
+- [~] Infisical secret backend (runtime integration implemented; deployment bootstrap still required)
 - [ ] Security event logging
 - [ ] Rate limiting
 
@@ -133,4 +134,4 @@ Every module must have:
 
 ## Remaining production dependencies
 
-The control plane now includes a client-trust layer: evidence-based fit review, outreach suppression, client preferences, outcome tracking, and regional playbooks. Live third-party execution is intentionally separate. The remaining work is provider adapter implementation and credential infrastructure: OAuth/API-key exchange, secret-manager integration, real calendar/CRM/email/phone/forms/payment/hosting calls, cron parsing/event delivery, and production authentication/RBAC. The registry, project configuration, approval history, secret references, and human gates are already in place so those adapters can be added without changing the project model.
+The control plane now includes a client-trust layer: evidence-based fit review, outreach suppression, client preferences, outcome tracking, and regional playbooks. Live third-party execution is intentionally separate. The remaining work is provider adapter implementation and credential infrastructure: OAuth/API-key exchange for selected calendar/CRM providers, Infisical-backed secret storage, real calendar/CRM calls, and remaining email/phone/forms/payment/hosting calls, cron parsing/event delivery, and production authentication/RBAC. The registry, project configuration, approval history, secret references, and human gates are already in place so those adapters can be added without changing the project model.
