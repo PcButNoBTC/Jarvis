@@ -3435,7 +3435,7 @@ def voice_test_call(payload: dict, request: Request):
             integration,
             "place_call",
             {"to":to,"from":payload.get("from") or os.getenv("TWILIO_FROM_NUMBER"),
-             "url":payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL")}
+             "url":payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/incoming")}
         )
     except Exception as exc:
         raise HTTPException(status_code=502,detail=f"Voice provider error: {type(exc).__name__}")
@@ -3547,6 +3547,10 @@ async def twilio_incoming(request: Request):
                     (call_sid,),
                 )
     stream_url=os.getenv("LUMA_VOICE_STREAM_URL")
+    if not stream_url:
+        public_url=os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")
+        if public_url:
+            stream_url=public_url.replace("https://","wss://").replace("http://","ws://")+"/voice/stream"
     if stream_url:
         xml=twilio_stream_twiml(stream_url)
     else:
