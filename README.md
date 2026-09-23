@@ -516,3 +516,23 @@ The API exposes this through opportunity fit assessment, outreach eligibility, c
 > We will show you what we observed, explain why it may matter, give you options, and let you decide. If we do not think automation is appropriate, we will say so.
 
 This approach is intended to build long-term local reputation and referrals while still optimizing for profitable delivery and measurable client outcomes.
+
+
+## Control & Intelligence Core
+
+Luma now includes a control-plane layer inspired by the strongest patterns found in open-source AI operations systems, implemented independently for this repository:
+
+- **Evidence engine:** claims are backed by evidence items and an explicit evidence-strength score; alternatives remain visible.
+- **Service blueprints:** each service has a reusable workflow, QA contract, required configuration, and success metrics.
+- **Runtime governance:** agent actions are evaluated for scope, risk, approval, and budget before execution.
+- **Agent budget ledger:** model/tool spend can be charged against hard monthly agent budgets.
+- **Scoped agent gateway:** agents receive control-plane tool scopes rather than direct database/provider access.
+- **Action receipts:** consequential decisions can be recorded in a tamper-evident hash chain.
+- **Durable checkpoints:** workflow state can be checkpointed and resumed after interruption.
+- **Trajectory evaluation:** agent actions, decisions, latency, and cost can be recorded for later evaluation.
+- **Client outcome metrics:** project metrics can be recorded and explicitly marked client-confirmed.
+- **Unit economics:** revenue, operating cost, contribution, margin, and revenue-per-operating-dollar are first-class analytics.
+
+The design principle is **evidence → policy → controlled action → receipt → outcome → learning**, not unrestricted autonomous execution.
+
+This architecture is informed by public research into projects such as Orionfold Relay, Comp AI CRM, JamJet, BoundFlow, SimplerDevelopment, and Autonomous Business OS. Luma does not copy their implementation; the ideas are independently implemented around Luma's existing evidence-first, client-control model.
