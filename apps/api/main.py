@@ -48,6 +48,25 @@ async def api_key_guard(request: Request, call_next):
     if not principal:
         return JSONResponse(status_code=401, content={"detail":"Authentication required"})
     request.state.principal=principal
+    if DATABASE_URL:
+        try:
+            from datetime import datetime, timezone, timedelta
+            bucket_start=datetime.now(timezone.utc).replace(second=0,microsecond=0)
+            bucket_key=f"{principal.get('sub','unknown')}:{request.client.host if request.client else 'unknown'}"
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""INSERT INTO security_rate_limits(bucket_key,window_start,request_count)
+                                   VALUES (%s,%s,1)
+                                   ON CONFLICT (bucket_key,window_start)
+                                   DO UPDATE SET request_count=security_rate_limits.request_count+1
+                                   RETURNING request_count""",(bucket_key,bucket_start))
+                    count=cur.fetchone()["request_count"]
+                    cur.execute("DELETE FROM security_rate_limits WHERE window_start < %s",(bucket_start-timedelta(minutes=5),))
+                    if count > 120:
+                        return JSONResponse(status_code=429,content={"detail":"Rate limit exceeded"})
+        except Exception:
+            # Rate limiting must never take the API down if the limiter is unavailable.
+            pass
     return await call_next(request)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
