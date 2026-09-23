@@ -42,7 +42,7 @@ def execute_integration(integration, capability, payload=None):
     adapter=get_adapter(integration["provider"],credentials)
     if capability=="health_check":
         return adapter.health_check()
-    actual_capability="send_email" if integration["provider"]=="smtp" and capability=="send_message" else capability
+    actual_capability=("send_email" if integration["provider"]=="smtp" else "sms") if capability=="send_message" and integration["provider"]=="twilio" or integration["provider"]=="smtp" and capability=="send_message" else capability
     result=adapter.execute(actual_capability,payload or {})
     # Some providers revoke access without an explicit expiry. One retry after a
     # refresh lets us recover from a stale access token while still surfacing
