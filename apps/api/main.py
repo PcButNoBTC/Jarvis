@@ -32,6 +32,7 @@ from economics import unit_economics
 from service_blueprints import blueprint, instantiate
 from action_receipts import make_receipt
 from checkpoints import checkpoint_state
+from agent_gateway import catalog as agent_tool_catalog, resolve as resolve_agent_tool
 
 app = FastAPI(title="Luma API", version="0.8.0")
 
@@ -3041,3 +3042,69 @@ def list_client_metrics(project_id: str):
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM client_metric_snapshots WHERE project_id=%s ORDER BY captured_at DESC",(project_id,))
             return cur.fetchall()
+
+
+@app.get("/agent-gateway/tools")
+def agent_gateway_tools():
+    return {"tools":agent_tool_catalog(),"policy":"All writes and external actions must pass /governance/evaluate."}
+
+@app.post("/agent-gateway/authorize")
+def agent_gateway_authorize(payload: dict):
+    name=payload.get("tool")
+    if not name: raise HTTPException(status_code=400,detail="tool is required")
+    try: tool=resolve_agent_tool(name)
+    except KeyError: raise HTTPException(status_code=404,detail="Unknown agent tool")
+    decision=evaluate_action(tool["scope"],tools=payload.get("allowed_scopes") or [],
+                             approval_required=bool(payload.get("approval_required",True)),
+                             approved=bool(payload.get("approved")),
+                             spent=float(payload.get("spent_usd") or 0),
+                             budget=float(payload.get("budget_usd") or 0),
+                             estimated_cost=float(payload.get("estimated_cost") or 0))
+    return {"tool":name,"risk":tool["risk"],"decision":decision.__dict__}
+
+@app.post("/agent-evaluations/trajectory")
+def record_agent_trajectory(payload: dict):
+    if not payload.get("agent_run_id") or payload.get("sequence") is None or not payload.get("event_type"):
+        raise HTTPException(status_code=400,detail="agent_run_id, sequence and event_type are required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO agent_trajectory_events
+              (agent_run_id,sequence,event_type,action,input,output,decision,latency_ms,cost_usd)
+              VALUES (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s) RETURNING *""",
+              (payload["agent_run_id"],payload["sequence"],payload["event_type"],payload.get("action"),
+               json.dumps(payload.get("input") or {}),json.dumps(payload.get("output") or {}),
+               payload.get("decision"),payload.get("latency_ms"),payload.get("cost_usd",0)))
+            return cur.fetchone()
+
+@app.get("/agent-evaluations/trajectory/{agent_run_id}")
+def get_agent_trajectory(agent_run_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM agent_trajectory_events WHERE agent_run_id=%s ORDER BY sequence,created_at",(agent_run_id,))
+            return cur.fetchall()
+
+@app.post("/agent-governance/charge")
+def charge_agent_budget(payload: dict):
+    if not payload.get("agent_name") or payload.get("amount") is None:
+        raise HTTPException(status_code=400,detail="agent_name and amount are required")
+    amount=float(payload["amount"])
+    if amount < 0: raise HTTPException(status_code=400,detail="amount must be non-negative")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COALESCE(SUM(amount),0) AS spent FROM agent_budget_ledger WHERE agent_name=%s AND occurred_at >= date_trunc('month',now())",(payload["agent_name"],))
+            spent=float(cur.fetchone()["spent"] or 0)
+            cur.execute("SELECT * FROM agent_policies WHERE agent_name=%s",(payload["agent_name"],))
+            row=cur.fetchone()
+            if row:
+                budget=float(row["budget_usd"] or 0)
+            else:
+                from agent_layer import agent_policy
+                budget=float(agent_policy(payload["agent_name"])["budget_usd"])
+            if spent+amount>budget:
+                raise HTTPException(status_code=409,detail={"message":"Agent budget exceeded","spent_usd":spent,"budget_usd":budget})
+            cur.execute("""INSERT INTO agent_budget_ledger
+              (agent_name,project_id,workflow_run_id,agent_run_id,amount,category)
+              VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
+              (payload["agent_name"],payload.get("project_id"),payload.get("workflow_run_id"),
+               payload.get("agent_run_id"),amount,payload.get("category","model")))
+            return {"charge":cur.fetchone(),"spent_usd":spent+amount,"budget_usd":budget}
