@@ -2781,6 +2781,19 @@ def oauth_callback(provider: str, code: str, state: str, request: Request):
     claims = verify_state(state)
     if not claims or claims.get("provider") != provider:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM oauth_state_nonces WHERE expires_at < now()")
+            try:
+                cur.execute("""INSERT INTO oauth_state_nonces(nonce,provider,project_id,expires_at)
+                               VALUES (%s,%s,%s,to_timestamp(%s))
+                               ON CONFLICT DO NOTHING RETURNING nonce""",
+                            (claims["nonce"],provider,claims["project_id"],claims["exp"]))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=400,detail="OAuth state has already been consumed")
+                cur.execute("UPDATE oauth_state_nonces SET consumed_at=now() WHERE nonce=%s",(claims["nonce"],))
+            except HTTPException:
+                raise
     redirect_uri = str(request.base_url).rstrip("/") + f"/integrations/oauth/{provider}/callback"
     try:
         tokens = token_request(provider, code, redirect_uri, claims.get("code_verifier"))
