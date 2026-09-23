@@ -767,3 +767,11 @@ CREATE TABLE IF NOT EXISTS security_events (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS security_rate_limits (
+  bucket_key TEXT NOT NULL,
+  window_start TIMESTAMPTZ NOT NULL,
+  request_count INT NOT NULL DEFAULT 0,
+  PRIMARY KEY(bucket_key,window_start)
+);
+CREATE INDEX IF NOT EXISTS idx_security_rate_limits_window ON security_rate_limits(window_start);
