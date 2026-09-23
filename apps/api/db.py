@@ -325,6 +325,14 @@ def ensure_delivery_schema():
       request_count INT NOT NULL DEFAULT 0, PRIMARY KEY(bucket_key,window_start)
     );
     CREATE INDEX IF NOT EXISTS idx_security_rate_limits_window ON security_rate_limits(window_start);
+    CREATE TABLE IF NOT EXISTS blueprint_optimization_proposals (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(), service_id UUID REFERENCES services(id) ON DELETE SET NULL,
+      project_id UUID REFERENCES projects(id) ON DELETE SET NULL, source_metric TEXT NOT NULL,
+      before_value NUMERIC(14,4), after_value NUMERIC(14,4), delta NUMERIC(14,4),
+      recommendation JSONB NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'proposed',
+      approved_by UUID, approved_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_blueprint_optimization_status ON blueprint_optimization_proposals(status, created_at DESC);
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
