@@ -36,7 +36,7 @@ from checkpoints import checkpoint_state
 from agent_gateway import catalog as agent_tool_catalog, resolve as resolve_agent_tool
 from provider_runtime import execute_integration, provider_status
 from blueprint_optimizer import propose
-from voice import voice_capabilities, disclosure_text, twilio_gather_twiml, twilio_stream_twiml, validate_twilio_signature, realtime_bridge, VOICE_MODES
+from voice import voice_capabilities, disclosure_text, twilio_gather_twiml, twilio_stream_twiml, validate_twilio_signature, realtime_bridge, VOICE_MODES, validate_destination
 
 app = FastAPI(title="Luma API", version="0.8.0")
 
@@ -3424,12 +3424,14 @@ def voice_test_call(payload: dict, request: Request):
     )
     if not decision.allowed:
         raise HTTPException(status_code=403,detail=decision.reason)
+    try:
+        to=validate_destination(to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400,detail=str(exc))
     integration={
         "provider":"twilio",
         "secret_ref":payload.get("secret_ref") or os.getenv("LUMA_TWILIO_SECRET_REF"),
     }
-    if not integration["secret_ref"]:
-        raise HTTPException(status_code=503,detail="Twilio secret reference is not configured")
     try:
         result=execute_integration(
             integration,
