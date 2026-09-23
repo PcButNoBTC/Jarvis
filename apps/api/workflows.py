@@ -10,6 +10,7 @@ WORKFLOWS = {
     "proposal_follow_up": {"steps":["wait","draft_follow_up","human_approval","send"],"external_action":"send","approval_steps":["human_approval"]},
     "project_delivery": {"steps":["requirements","generate","validate","client_review","launch","handoff"],"external_action":"launch","approval_steps":["client_review","launch"]},
     "research": {"steps":["research","qualify","create_opportunities"],"external_action":None,"approval_steps":[]},
+    "blueprint_optimization": {"steps":["collect_metrics","detect_pattern","propose_experiment","human_approval","publish_blueprint"],"external_action":"publish_blueprint","approval_steps":["human_approval","publish_blueprint"]},
 }
 
 def workflow_definition(name: str) -> dict:
