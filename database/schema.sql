@@ -800,3 +800,32 @@ CREATE TABLE IF NOT EXISTS oauth_state_nonces (
   consumed_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_oauth_state_nonces_expiry ON oauth_state_nonces(expires_at);
+
+
+-- Conversational voice sessions. Voice is optional; email/portal remain the canonical async path.
+CREATE TABLE IF NOT EXISTS voice_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id UUID REFERENCES businesses(id) ON DELETE SET NULL,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  caller TEXT,
+  mode TEXT NOT NULL DEFAULT 'receptionist',
+  status TEXT NOT NULL DEFAULT 'active',
+  disclosed BOOLEAN NOT NULL DEFAULT false,
+  escalation_reason TEXT,
+  facts JSONB NOT NULL DEFAULT '{}',
+  pending_actions JSONB NOT NULL DEFAULT '[]',
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ended_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_status ON voice_sessions(status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS voice_turns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+  speaker TEXT NOT NULL,
+  transcript TEXT NOT NULL,
+  sequence INT NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_voice_turns_session ON voice_turns(session_id, sequence);
