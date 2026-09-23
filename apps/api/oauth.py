@@ -6,7 +6,8 @@ refresh tokens belong in the configured secret backend, not PostgreSQL.
 import base64, hashlib, hmac, json, os, secrets, time
 from urllib.parse import urlencode
 
-STATE_SECRET = os.getenv("LUMA_AUTH_SECRET", "")
+def _state_secret():
+    return os.getenv("LUMA_AUTH_SECRET", "")
 
 PROVIDERS = {
     "google_calendar": {
@@ -47,7 +48,8 @@ def config(provider):
 
 
 def state(provider, project_id, code_verifier=None):
-    if not STATE_SECRET:
+    secret = _state_secret()
+    if not secret:
         raise RuntimeError("LUMA_AUTH_SECRET is required")
     payload = {
         "provider": provider,
@@ -59,14 +61,14 @@ def state(provider, project_id, code_verifier=None):
         payload["code_verifier"] = code_verifier
     raw = json.dumps(payload, separators=(",", ":")).encode()
     body = base64.urlsafe_b64encode(raw).decode().rstrip("=")
-    sig = hmac.new(STATE_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()
     return body + "." + sig
 
 
 def verify_state(value):
     try:
         body, sig = value.split(".", 1)
-        expected = hmac.new(STATE_SECRET.encode(), body.encode(), hashlib.sha256).hexdigest()
+        expected = hmac.new(_state_secret().encode(), body.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected):
             return None
         payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
