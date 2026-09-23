@@ -333,6 +333,11 @@ def ensure_delivery_schema():
       approved_by UUID, approved_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS idx_blueprint_optimization_status ON blueprint_optimization_proposals(status, created_at DESC);
+    CREATE TABLE IF NOT EXISTS oauth_state_nonces (
+      nonce TEXT PRIMARY KEY, provider TEXT NOT NULL, project_id UUID NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL, consumed_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_oauth_state_nonces_expiry ON oauth_state_nonces(expires_at);
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
