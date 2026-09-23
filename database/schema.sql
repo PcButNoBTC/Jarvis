@@ -647,8 +647,7 @@ ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS provider_account_id
 ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS last_health_check_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_integration_connections_secret_ref ON integration_connections(secret_ref);
-\n
--- Luma Control & Intelligence Core
+\n-- Luma Control & Intelligence Core
 CREATE TABLE IF NOT EXISTS evidence_claims (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   business_id UUID REFERENCES businesses(id) ON DELETE CASCADE,
