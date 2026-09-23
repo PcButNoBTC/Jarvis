@@ -26,6 +26,12 @@ from oauth import authorization_url, verify_state, token_request
 from client_trust import assess_opportunity, outreach_disposition, should_expand
 from secret_backend import backend as secret_backend
 from provider_adapters import get_adapter
+from evidence_engine import build_claim, evidence_strength
+from policy_engine import evaluate_action, normalize_policy
+from economics import unit_economics
+from service_blueprints import blueprint, instantiate
+from action_receipts import make_receipt
+from checkpoints import checkpoint_state
 
 app = FastAPI(title="Luma API", version="0.8.0")
 
@@ -2871,3 +2877,167 @@ def create_regional_playbook(payload: dict):
                 ),
             )
             return cur.fetchone()
+
+
+# --- Control & Intelligence Core ---
+
+@app.get("/governance/agents/{agent_name}")
+def governance_agent(agent_name: str):
+    from agent_layer import agent_definition
+    try:
+        definition=agent_definition(agent_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM agent_policies WHERE agent_name=%s",(agent_name,))
+            row=cur.fetchone()
+    return {"agent":normalize_policy(agent_name,row), "definition":definition}
+
+@app.post("/governance/evaluate")
+def governance_evaluate(payload: dict):
+    agent=payload.get("agent_name")
+    action=payload.get("action")
+    if not agent or not action:
+        raise HTTPException(status_code=400,detail="agent_name and action are required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM agent_policies WHERE agent_name=%s",(agent,))
+            row=cur.fetchone()
+            if row:
+                policy=normalize_policy(agent,row)
+            else:
+                from agent_layer import agent_policy
+                policy=agent_policy(agent)
+            cur.execute("SELECT COALESCE(SUM(amount),0) AS spent FROM agent_budget_ledger WHERE agent_name=%s AND occurred_at >= date_trunc('month',now())",(agent,))
+            spent=float(cur.fetchone()["spent"] or 0)
+    decision=evaluate_action(action,tools=policy["tools"],approval_required=policy["approval_required"],
+                             approved=bool(payload.get("approved")),spent=spent,budget=policy["budget_usd"],
+                             estimated_cost=float(payload.get("estimated_cost") or 0))
+    return {"decision":decision.__dict__,"policy":policy,"spent_usd":spent}
+
+@app.post("/governance/receipts")
+def governance_receipt(payload: dict):
+    receipt=make_receipt(action=payload.get("action","unknown"),decision=payload.get("decision","unknown"),
+                         actor=payload.get("actor","agent"),entity_type=payload.get("entity_type"),
+                         entity_id=payload.get("entity_id"),cost=payload.get("cost",0),
+                         previous_hash=payload.get("previous_hash"),metadata=payload.get("metadata"))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO agent_action_receipts
+              (agent_run_id,actor_type,action,decision,risk,reason,estimated_cost,previous_hash,receipt_hash,entity_type,entity_id,metadata)
+              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+              (payload.get("agent_run_id"),payload.get("actor_type","agent"),receipt["action"],receipt["decision"],
+               payload.get("risk","unknown"),payload.get("reason",""),receipt["cost"],receipt["previous_hash"],
+               receipt["hash"],receipt["entity_type"],receipt["entity_id"],json.dumps(receipt["metadata"])))
+            return cur.fetchone()
+
+@app.post("/evidence/claims")
+def create_evidence_claim(payload: dict):
+    claim=payload.get("claim")
+    evidence=payload.get("evidence") or []
+    if not claim or not evidence:
+        raise HTTPException(status_code=400,detail="claim and evidence are required")
+    built=build_claim(claim,evidence,alternatives=payload.get("alternatives"))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO evidence_claims
+              (business_id,research_report_id,opportunity_id,claim,evidence_strength,alternatives,verified_at)
+              VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING *""",
+              (payload.get("business_id"),payload.get("research_report_id"),payload.get("opportunity_id"),
+               claim,built["evidence_strength"],json.dumps(built["alternatives"]),built["verified_at"]))
+            row=cur.fetchone()
+            for item in evidence:
+                eid=item.get("id")
+                if eid:
+                    cur.execute("INSERT INTO claim_evidence(claim_id,evidence_id,relation) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+                                (row["id"],eid,item.get("relation","supports")))
+            return {**row,"evidence_strength":built["evidence_strength"]}
+
+@app.get("/evidence/claims/{opportunity_id}")
+def list_evidence_claims(opportunity_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT c.*, COALESCE(jsonb_agg(jsonb_build_object(
+              'id',e.id,'observation',e.observation,'source_url',e.source_url,'confidence',e.confidence,'relation',ce.relation))
+              FILTER (WHERE e.id IS NOT NULL),'[]') AS evidence
+              FROM evidence_claims c LEFT JOIN claim_evidence ce ON ce.claim_id=c.id
+              LEFT JOIN evidence_items e ON e.id=ce.evidence_id
+              WHERE c.opportunity_id=%s GROUP BY c.id ORDER BY c.verified_at DESC""",(opportunity_id,))
+            return cur.fetchall()
+
+@app.get("/services/{service_name}/blueprint")
+def service_blueprint(service_name: str):
+    try: return blueprint(service_name)
+    except ValueError as exc: raise HTTPException(status_code=404,detail=str(exc))
+
+@app.post("/projects/{project_id}/blueprint")
+def project_blueprint(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project,_=_delivery_project(cur,project_id)
+            service=project.get("service_name")
+            cur.execute("SELECT options FROM project_options WHERE project_id=%s",(project_id,))
+            row=cur.fetchone()
+            selected=row["options"] if row else {}
+            try:
+                return instantiate(service,selected,project.get("requirements") or {})
+            except ValueError as exc:
+                raise HTTPException(status_code=404,detail=str(exc))
+
+@app.post("/automation/runs/{run_id}/checkpoint")
+def save_workflow_checkpoint(run_id: str, payload: dict):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workflow_runs WHERE id=%s",(run_id,))
+            run=cur.fetchone()
+            if not run: raise HTTPException(status_code=404,detail="Workflow run not found")
+            state=checkpoint_state(run,step=payload.get("step"),state=payload.get("state"))
+            cur.execute("""INSERT INTO workflow_checkpoints(workflow_run_id,step,state)
+                           VALUES (%s,%s,%s::jsonb) RETURNING *""",
+                        (run_id,state["step"],json.dumps(state["state"])))
+            cur.execute("UPDATE workflow_runs SET checkpoint_version=checkpoint_version+1, output=%s::jsonb WHERE id=%s",
+                        (json.dumps(state["state"]),run_id))
+            return cur.fetchone()
+
+@app.get("/automation/runs/{run_id}/checkpoints")
+def list_workflow_checkpoints(run_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workflow_checkpoints WHERE workflow_run_id=%s ORDER BY created_at DESC",(run_id,))
+            return cur.fetchall()
+
+@app.get("/analytics/unit-economics")
+def analytics_unit_economics(project_id: str|None=None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if project_id:
+                cur.execute("SELECT COALESCE(SUM(amount),0) AS revenue FROM revenue_transactions WHERE project_id=%s AND status IN ('paid','completed')",(project_id,))
+                revenue=float(cur.fetchone()["revenue"] or 0)
+                cur.execute("SELECT COALESCE(SUM(amount),0) AS cost FROM cost_records WHERE project_id=%s",(project_id,))
+                cost=float(cur.fetchone()["cost"] or 0)
+            else:
+                cur.execute("SELECT COALESCE(SUM(amount),0) AS revenue FROM revenue_transactions WHERE status IN ('paid','completed')")
+                revenue=float(cur.fetchone()["revenue"] or 0)
+                cur.execute("SELECT COALESCE(SUM(amount),0) AS cost FROM cost_records")
+                cost=float(cur.fetchone()["cost"] or 0)
+            return unit_economics(revenue,cost)
+
+@app.post("/analytics/client-metrics")
+def record_client_metric(payload: dict):
+    if not payload.get("metric_name"): raise HTTPException(status_code=400,detail="metric_name is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO client_metric_snapshots
+              (client_id,project_id,metric_name,value,unit,source,client_confirmed)
+              VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+              (payload.get("client_id"),payload.get("project_id"),payload["metric_name"],payload.get("value"),
+               payload.get("unit"),payload.get("source","operator"),bool(payload.get("client_confirmed"))))
+            return cur.fetchone()
+
+@app.get("/analytics/client-metrics/{project_id}")
+def list_client_metrics(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM client_metric_snapshots WHERE project_id=%s ORDER BY captured_at DESC",(project_id,))
+            return cur.fetchall()
