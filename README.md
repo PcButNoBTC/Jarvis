@@ -562,4 +562,4 @@ The API uses PostgreSQL-backed fixed-window buckets so multiple API replicas sha
 
 ### Secret infrastructure
 
-A self-hosted Infisical Docker Compose bundle lives under `infrastructure/infisical/`. Luma stores only secret references in PostgreSQL; provider OAuth tokens belong in Infisical. Infisical's official self-hosting architecture uses the application server, PostgreSQL, Redis, and a migration job. citeturn2search0turn2search1
+A self-hosted Infisical Docker Compose bundle lives under `infrastructure/infisical/`. Luma stores only secret references in PostgreSQL; provider OAuth tokens belong in Infisical. Infisical's official self-hosting architecture uses the application server, PostgreSQL, Redis, and a migration job.
