@@ -1,0 +1,61 @@
+# Luma
+
+Luma is a self-hosted AI business operating system in the PcButNoBTC/Jarvis repository.
+
+## Core loop
+
+Discover → Research → Qualify → Sell → Configure → Build → QA → Launch/Handoff → Measure → Learn.
+
+## Primary capabilities
+
+- prospect ingestion and deduplication
+- evidence-first website research
+- multi-service opportunity qualification
+- client-trust sales workflows
+- human-gated outreach
+- proposal and project lifecycle
+- service-specific project configuration
+- delivery artifacts and QA
+- bounded static deployment
+- client portal
+- billing and revenue analytics
+- recurring revenue
+- agent policies, scopes, budgets and evaluations
+- governed provider execution
+- OAuth token refresh
+- secret references and Infisical integration
+- distributed PostgreSQL-backed rate limiting
+- durable workflows and schedules
+- client outcome metrics
+- outcome-to-blueprint optimization with human approval
+- regional growth playbooks
+
+## Services
+
+AI Website; AI Receptionist; Lead Capture System; Appointment Automation; Review Automation; Video Walkthrough; Custom Automation.
+
+## Runtime providers
+
+Google Calendar, Microsoft Outlook, Calendly, HubSpot, SMTP and Twilio have runtime adapter paths. Stripe, hosting, forms and analytics have foundations/registry entries where applicable and are not universally production-complete.
+
+## Governance
+
+Consequential actions follow identity → rate limit → scope → risk → approval → secret retrieval → provider adapter → audit → receipt → outcome.
+
+## Secret model
+
+PostgreSQL stores secret references. Provider credentials belong in the configured secret backend. A self-hosted Infisical deployment bundle is provided under infrastructure/infisical/.
+
+## Important limitations
+
+Luma does not fabricate credentials, DNS ownership, provider accounts or external permissions. Universal autonomous provisioning is not claimed. Live provider credentials and real-account testing are required before production declarations.
+
+## Documentation
+
+- README.md
+- docs/CAPABILITIES.md
+- docs/ARCHITECTURE.md
+- docs/INTEGRATIONS.md
+- docs/OPERATIONS.md
+- SECURITY.md
+- ROADMAP.md
