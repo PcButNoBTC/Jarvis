@@ -2607,3 +2607,187 @@ def oauth_callback(provider: str, code: str, state: str, request: Request):
     # Token exchange is intentionally delegated to the provider adapter layer;
     # no authorization code or token is persisted by this callback.
     return {"status":"authorized_code_received","provider":provider,"project_id":claims["project_id"],"next_step":"token_exchange"}
+
+
+# Client trust, outcome, and regional-growth controls.
+@app.post("/opportunities/{opportunity_id}/fit")
+def evaluate_opportunity_fit(opportunity_id: str, payload: dict):
+    result = assess_opportunity(
+        evidence_count=payload.get("evidence_count", 0),
+        evidence_confidence=payload.get("evidence_confidence", 0),
+        impact_confidence=payload.get("impact_confidence", 0),
+        solution_fit=payload.get("solution_fit", 0),
+        intrusiveness_risk=payload.get("intrusiveness_risk", 0),
+        problem_proven=payload.get("problem_proven", True),
+    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE opportunities
+                   SET fit_score=%s, fit_disposition=%s, why_this=%s,
+                       why_not=%s::jsonb, alternatives=%s::jsonb
+                   WHERE id=%s RETURNING *""",
+                (
+                    result["score"], result["disposition"],
+                    payload.get("why_this"),
+                    json.dumps(payload.get("why_not") or []),
+                    json.dumps(payload.get("alternatives") or []),
+                    opportunity_id,
+                ),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Opportunity not found")
+            return {"opportunity": row, "assessment": result}
+
+@app.get("/businesses/{business_id}/outreach-preferences")
+def get_outreach_preferences(business_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM outreach_preferences WHERE business_id=%s", (business_id,))
+            return cur.fetchone() or {
+                "business_id": business_id, "status": "normal",
+                "contact_count": 0, "reason": None,
+            }
+
+@app.patch("/businesses/{business_id}/outreach-preferences")
+def update_outreach_preferences(business_id: str, payload: dict):
+    status = (payload.get("status") or "normal").lower()
+    if status not in {"normal", "maybe_later", "do_not_contact", "not_interested", "complaint"}:
+        raise HTTPException(status_code=400, detail="Invalid outreach preference")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO outreach_preferences
+                   (business_id,status,reason,source,contact_count)
+                   VALUES (%s,%s,%s,%s,%s)
+                   ON CONFLICT (business_id) DO UPDATE SET
+                     status=EXCLUDED.status, reason=EXCLUDED.reason, source=EXCLUDED.source,
+                     contact_count=EXCLUDED.contact_count, updated_at=now()
+                   RETURNING *""",
+                (business_id, status, payload.get("reason"), payload.get("source", "operator"),
+                 int(payload.get("contact_count", 0))),
+            )
+            return cur.fetchone()
+
+@app.post("/outreach/check")
+def check_outreach_eligibility(payload: dict):
+    preference = payload.get("preference", "normal")
+    count = int(payload.get("prior_contact_count", 0))
+    return outreach_disposition(preference, count)
+
+@app.post("/clients/{client_id}/outcomes")
+def record_client_outcome(client_id: str, payload: dict):
+    if not payload.get("outcome_type"):
+        raise HTTPException(status_code=400, detail="outcome_type is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO client_outcomes
+                   (client_id,project_id,outcome_type,baseline,current_value,status,client_confirmed,notes)
+                   VALUES (%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s) RETURNING *""",
+                (
+                    client_id, payload.get("project_id"), payload["outcome_type"],
+                    json.dumps(payload.get("baseline") or {}),
+                    json.dumps(payload.get("current_value") or {}),
+                    payload.get("status", "tracking"),
+                    bool(payload.get("client_confirmed", False)),
+                    payload.get("notes"),
+                ),
+            )
+            return cur.fetchone()
+
+@app.get("/clients/{client_id}/outcomes")
+def list_client_outcomes(client_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM client_outcomes WHERE client_id=%s ORDER BY measured_at DESC",
+                (client_id,),
+            )
+            return cur.fetchall()
+
+@app.post("/clients/{client_id}/expansion-check")
+def expansion_check(client_id: str, payload: dict):
+    result = should_expand(
+        payload.get("existing_outcome", "tracking"),
+        bool(payload.get("client_approved", False)),
+        bool(payload.get("new_problem_evidence", False)),
+    )
+    return {
+        "eligible": result,
+        "rule": "Expansion requires demonstrated value, client approval, and separately evidenced need.",
+    }
+
+@app.get("/clients/{client_id}/preferences")
+def get_client_preferences(client_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM client_preferences WHERE client_id=%s", (client_id,))
+            return cur.fetchone() or {
+                "client_id": client_id,
+                "ai_disclosure": True,
+                "data_ownership_note": "Client retains ownership of business data and deliverables, subject to the engagement agreement.",
+                "preferred_contact_channel": "email",
+                "communication_frequency": "normal",
+            }
+
+@app.patch("/clients/{client_id}/preferences")
+def update_client_preferences(client_id: str, payload: dict):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO client_preferences
+                   (client_id,ai_disclosure,data_ownership_note,preferred_contact_channel,communication_frequency,notes)
+                   VALUES (%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (client_id) DO UPDATE SET
+                     ai_disclosure=EXCLUDED.ai_disclosure,
+                     data_ownership_note=EXCLUDED.data_ownership_note,
+                     preferred_contact_channel=EXCLUDED.preferred_contact_channel,
+                     communication_frequency=EXCLUDED.communication_frequency,
+                     notes=EXCLUDED.notes, updated_at=now()
+                   RETURNING *""",
+                (
+                    client_id, bool(payload.get("ai_disclosure", True)),
+                    payload.get("data_ownership_note",
+                                "Client retains ownership of business data and deliverables, subject to the engagement agreement."),
+                    payload.get("preferred_contact_channel", "email"),
+                    payload.get("communication_frequency", "normal"),
+                    payload.get("notes"),
+                ),
+            )
+            return cur.fetchone()
+
+@app.get("/regional-playbooks")
+def list_regional_playbooks():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM regional_playbooks ORDER BY display_name")
+            return cur.fetchall()
+
+@app.post("/regional-playbooks")
+def create_regional_playbook(payload: dict):
+    if not payload.get("region_key") or not payload.get("display_name"):
+        raise HTTPException(status_code=400, detail="region_key and display_name are required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO regional_playbooks
+                   (region_key,display_name,status,notes,proven_offers,industry_patterns,outreach_metrics,client_success_metrics)
+                   VALUES (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb)
+                   ON CONFLICT (region_key) DO UPDATE SET
+                     display_name=EXCLUDED.display_name, status=EXCLUDED.status, notes=EXCLUDED.notes,
+                     proven_offers=EXCLUDED.proven_offers, industry_patterns=EXCLUDED.industry_patterns,
+                     outreach_metrics=EXCLUDED.outreach_metrics, client_success_metrics=EXCLUDED.client_success_metrics,
+                     updated_at=now()
+                   RETURNING *""",
+                (
+                    payload["region_key"], payload["display_name"], payload.get("status", "pilot"),
+                    payload.get("notes"),
+                    json.dumps(payload.get("proven_offers") or []),
+                    json.dumps(payload.get("industry_patterns") or []),
+                    json.dumps(payload.get("outreach_metrics") or {}),
+                    json.dumps(payload.get("client_success_metrics") or {}),
+                ),
+            )
+            return cur.fetchone()
