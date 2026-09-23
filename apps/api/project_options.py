@@ -158,3 +158,7 @@ def option_summary(service_name, selected):
         }
         for item in definitions
     ]
+
+
+# Backward-compatible import for callers that historically imported the compiler here.
+from requirements import compile_requirements
