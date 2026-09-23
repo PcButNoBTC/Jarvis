@@ -33,6 +33,8 @@ from service_blueprints import blueprint, instantiate
 from action_receipts import make_receipt
 from checkpoints import checkpoint_state
 from agent_gateway import catalog as agent_tool_catalog, resolve as resolve_agent_tool
+from provider_runtime import execute_integration, provider_status
+from blueprint_optimizer import propose
 
 app = FastAPI(title="Luma API", version="0.8.0")
 
@@ -2573,16 +2575,23 @@ def verify_integration(integration_id: str, payload: dict):
         raise HTTPException(status_code=400, detail="Explicit approved=true is required")
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT * FROM integration_connections WHERE id=%s",(integration_id,))
+            row=cur.fetchone()
+            if not row: raise HTTPException(status_code=404,detail="Integration not found")
+    health=provider_status(row) if row.get("secret_ref") else {"status":"handoff_required","error":"No secret reference"}
+    if health["status"]!="ok" and not payload.get("allow_handoff"):
+        raise HTTPException(status_code=409,detail={"message":"Provider health check failed","health":health})
+    with get_conn() as conn:
+        with conn.cursor() as cur:
             cur.execute(
                 """UPDATE integration_connections
                    SET status='verified', connected_at=COALESCE(connected_at,now()),
-                       metadata=metadata || %s::jsonb
+                       last_health_check_at=now(), metadata=metadata || %s::jsonb
                    WHERE id=%s RETURNING *""",
-                (json.dumps({"verified_by": payload.get("verified_by", "human"), "verification_note": payload.get("note")}), integration_id),
+                (json.dumps({"verified_by": payload.get("verified_by", "human"), "verification_note": payload.get("note"),"health":health}), integration_id),
             )
             row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Integration not found")
+            if not row: raise HTTPException(status_code=404, detail="Integration not found")
             cur.execute(
                 """INSERT INTO audit_log (actor_type, action, entity_type, entity_id, metadata)
                    VALUES ('human','integration_verified','integration_connection',%s,%s::jsonb)""",
@@ -3061,6 +3070,36 @@ def list_workflow_checkpoints(run_id: str):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM workflow_checkpoints WHERE workflow_run_id=%s ORDER BY created_at DESC",(run_id,))
+            return cur.fetchall()
+
+@app.post("/analytics/blueprint-optimizations")
+def create_blueprint_optimization(payload: dict):
+    metric=payload.get("metric_name")
+    if not metric or payload.get("before_value") is None or payload.get("after_value") is None:
+        raise HTTPException(status_code=400,detail="metric_name, before_value and after_value are required")
+    recommendation=propose(metric,payload["before_value"],payload["after_value"],payload.get("target"),
+                            payload.get("service"),payload.get("blueprint_version",1))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            service_id=None
+            if payload.get("service"):
+                cur.execute("SELECT id FROM services WHERE name=%s",(payload["service"],))
+                row=cur.fetchone(); service_id=row["id"] if row else None
+            cur.execute("""INSERT INTO blueprint_optimization_proposals
+              (service_id,project_id,source_metric,before_value,after_value,delta,recommendation)
+              VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+              (service_id,payload.get("project_id"),metric,payload["before_value"],payload["after_value"],
+               recommendation["delta"],json.dumps(recommendation)))
+            return cur.fetchone()
+
+@app.get("/analytics/blueprint-optimizations")
+def list_blueprint_optimizations(status: str|None=None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if status:
+                cur.execute("SELECT * FROM blueprint_optimization_proposals WHERE status=%s ORDER BY created_at DESC",(status,))
+            else:
+                cur.execute("SELECT * FROM blueprint_optimization_proposals ORDER BY created_at DESC LIMIT 200")
             return cur.fetchall()
 
 @app.get("/analytics/unit-economics")
