@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import LaunchCenter from "./launch-center";
+import ClientTrustCenter from "./client-trust-center";
 import ProjectConfiguration from "./project-configuration";
 import RevenueAnalytics from "./revenue-analytics";
 import IntegrationCenter from "./integration-center";
@@ -499,6 +500,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <ClientTrustCenter />
 
       <ProjectConfiguration projects={d.active_projects} />
 
