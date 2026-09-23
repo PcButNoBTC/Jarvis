@@ -109,3 +109,67 @@ def voice_capabilities() -> dict[str, Any]:
         "providers":{"telephony":["twilio","telnyx","existing_phone_system"],"speech_bridge":["realtime_provider"]},
         "status":"control_plane_ready; live telephony and realtime speech require provider credentials and bridge validation",
     }
+
+
+async def realtime_bridge(twilio_ws, public_url: str | None = None):
+    """Bridge Twilio bidirectional media to a configurable realtime speech model."""
+    import json
+    import websockets
+
+    api_key=os.getenv("LUMA_REALTIME_API_KEY") or os.getenv("OPENAI_API_KEY")
+    realtime_url=os.getenv("LUMA_REALTIME_URL","wss://api.openai.com/v1/realtime")
+    model=os.getenv("LUMA_REALTIME_MODEL","gpt-realtime-2.1")
+    if not api_key:
+        raise RuntimeError("LUMA_REALTIME_API_KEY or OPENAI_API_KEY is required")
+    separator="&" if "?" in realtime_url else "?"
+    ws_url=realtime_url + separator + "model=" + model
+    headers={"Authorization":f"Bearer {api_key}","OpenAI-Beta":"realtime=v1"}
+    async with websockets.connect(ws_url, additional_headers=headers, max_size=None, ping_interval=20, ping_timeout=20) as ai_ws:
+        session_update={
+            "type":"session.update",
+            "session":{
+                "instructions":system_policy("receptionist")+" Speak naturally, briefly, and warmly. You are an AI and must disclose that. The caller can switch to email at any time.",
+                "modalities":["audio","text"],
+                "voice":os.getenv("LUMA_REALTIME_VOICE","marin"),
+                "input_audio_format":"g711_ulaw",
+                "output_audio_format":"g711_ulaw",
+                "turn_detection":{"type":"server_vad","create_response":True,"interrupt_response":True},
+            },
+        }
+        await ai_ws.send(json.dumps(session_update))
+        stream_sid=None
+        async def from_twilio():
+            nonlocal stream_sid
+            while True:
+                raw=await twilio_ws.receive_text()
+                msg=json.loads(raw)
+                event=msg.get("event")
+                if event=="start":
+                    stream_sid=msg.get("start",{}).get("streamSid") or msg.get("streamSid")
+                    await ai_ws.send(json.dumps({"type":"response.create"}))
+                elif event=="media":
+                    payload=msg.get("media",{}).get("payload")
+                    if payload:
+                        await ai_ws.send(json.dumps({"type":"input_audio_buffer.append","audio":payload}))
+                elif event=="stop":
+                    break
+        async def to_twilio():
+            while True:
+                raw=await ai_ws.recv()
+                event=json.loads(raw)
+                kind=event.get("type","")
+                if kind=="response.audio.delta" and stream_sid:
+                    await twilio_ws.send_text(json.dumps({"event":"media","streamSid":stream_sid,"media":{"payload":event.get("delta","")}}))
+                elif kind=="input_audio_buffer.speech_started" and stream_sid:
+                    await twilio_ws.send_text(json.dumps({"event":"clear","streamSid":stream_sid}))
+                elif kind in {"error","session.created"}:
+                    if kind=="error":
+                        await twilio_ws.send_text(json.dumps({"event":"clear","streamSid":stream_sid})) if stream_sid else None
+        import asyncio
+        done,_=await asyncio.wait(
+            [asyncio.create_task(from_twilio()),asyncio.create_task(to_twilio())],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in done:
+            if task.exception() and not isinstance(task.exception(), RuntimeError):
+                raise task.exception()
