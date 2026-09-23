@@ -158,7 +158,7 @@ class CalendlyAdapter(TokenAdapter):
         return super().execute(capability, payload)
 
 class TwilioAdapter(ProviderAdapter):
-    provider = "twilio"; capabilities = {"health_check", "call_forwarding", "voice", "sms"}
+    provider = "twilio"; capabilities = {"health_check", "call_forwarding", "voice", "sms", "place_call"}
     def health_check(self):
         sid=self.credentials.get("account_sid") or os.getenv("TWILIO_ACCOUNT_SID")
         token=self.credentials.get("auth_token") or os.getenv("TWILIO_AUTH_TOKEN")
@@ -168,11 +168,27 @@ class TwilioAdapter(ProviderAdapter):
             return ProviderResponse("ok" if r.is_success else "error",self.provider,"health_check",r.json() if r.content else {},None if r.is_success else r.text)
         except Exception as exc: return ProviderResponse("error",self.provider,"health_check",{},type(exc).__name__)
     def execute(self, capability, payload=None):
-        if capability!="sms": return super().execute(capability,payload)
         payload=payload or {}
         sid=self.credentials.get("account_sid") or os.getenv("TWILIO_ACCOUNT_SID")
         token=self.credentials.get("auth_token") or os.getenv("TWILIO_AUTH_TOKEN")
-        sender=payload.get("from") or self.credentials.get("from")
+        if capability=="place_call":
+            import re
+            to=payload.get("to")
+            sender=payload.get("from") or self.credentials.get("from") or os.getenv("TWILIO_FROM_NUMBER")
+            twiml_url=payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL")
+            if not sid or not token or not sender or not to or not twiml_url:
+                return ProviderResponse("error",self.provider,capability,{},"Missing Twilio SID/token/from/url")
+            if not re.fullmatch(r"\+[1-9]\d{7,14}",to) or not re.fullmatch(r"\+[1-9]\d{7,14}",sender):
+                return ProviderResponse("error",self.provider,capability,{},"Phone numbers must use E.164 format")
+            try:
+                r=httpx.post(f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json",
+                             auth=(sid,token),data={"From":sender,"To":to,"Url":twiml_url},timeout=20)
+                data=r.json() if r.content else {}
+                return ProviderResponse("ok" if r.is_success else "error",self.provider,capability,data,None if r.is_success else r.text)
+            except Exception as exc:
+                return ProviderResponse("error",self.provider,capability,{},type(exc).__name__)
+        if capability!="sms": return super().execute(capability,payload)
+        sender=payload.get("from") or self.credentials.get("from") or os.getenv("TWILIO_FROM_NUMBER")
         if not sid or not token or not sender or not payload.get("to") or not payload.get("body"):
             return ProviderResponse("error",self.provider,capability,{},"Missing Twilio SMS fields")
         try:
