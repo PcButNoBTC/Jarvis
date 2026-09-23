@@ -67,9 +67,9 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 ## Phase 7 — Integrations
 - [x] Provider registry
 - [x] Connection records
-- [ ] Email adapter
-- [~] Calendar adapters (Google, Outlook, Calendly OAuth/connect foundation + runtime adapters)
-- [~] CRM adapter (HubSpot OAuth/connect foundation + runtime adapter)
+- [x] Email adapter (SMTP runtime)
+- [x] Calendar adapters (Google, Outlook, Calendly runtime/connect foundation)
+- [x] CRM adapter (HubSpot OAuth/connect foundation + runtime adapter)
 - [ ] Forms adapter
 - [ ] Phone/voice adapter
 - [ ] Analytics adapter
@@ -84,8 +84,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Roles/permissions
 - [x] Secret-reference abstraction
 - [~] Infisical secret backend (runtime integration implemented; deployment bootstrap still required)
-- [ ] Security event logging
-- [ ] Rate limiting
+- [x] Security event logging
+- [x] PostgreSQL-backed distributed application rate limiting
 
 ## Phase 9 — Client portal
 - [x] Client AI-disclosure and communication preferences
@@ -134,7 +134,7 @@ Every module must have:
 
 ## Remaining production dependencies
 
-The control plane now includes a client-trust layer: evidence-based fit review, outreach suppression, client preferences, outcome tracking, and regional playbooks. Live third-party execution is intentionally separate. The remaining work is provider adapter implementation and credential infrastructure: OAuth/API-key exchange for selected calendar/CRM providers, Infisical-backed secret storage, real calendar/CRM calls, and remaining email/phone/forms/payment/hosting calls, cron parsing/event delivery, and production authentication/RBAC. The registry, project configuration, approval history, secret references, and human gates are already in place so those adapters can be added without changing the project model.
+Core control-plane and selected live provider runtime paths are implemented. Remaining production work is deliberately bounded: provider-specific deployment/hosting, forms, analytics, broader payment execution, event-driven orchestration, enterprise authentication hardening, edge rate limiting, client messaging, and broader provider provisioning. Live credentials and provider-account testing remain required before declaring an integration production-ready.
 
 
 ## Phase 12 — Control & Intelligence Core (revamp)
@@ -151,9 +151,9 @@ The control plane now includes a client-trust layer: evidence-based fit review, 
 - [x] Agent trajectory events
 - [x] Unit economics endpoint
 - [x] Security event schema
-- [ ] DB-backed distributed rate limiting
-- [ ] Provider actions fully wrapped by gateway/policy middleware
-- [ ] Automated outcome-to-blueprint optimization
+- [x] DB-backed distributed rate limiting
+- [x] Provider actions wrapped by gateway/policy middleware
+- [x] Automated outcome-to-blueprint optimization with human publication gate
 
 - [x] Governed provider execution gateway
 - [x] OAuth access-token expiry persistence
@@ -164,3 +164,14 @@ The control plane now includes a client-trust layer: evidence-based fit review, 
 - [x] Automated metric scanning for optimization candidates
 - [x] Distributed PostgreSQL-backed rate limiting for API/auth/OAuth
 - [x] Self-hosted Infisical deployment bundle
+
+
+## Capability status language
+
+- **Ready:** implemented control-plane capability.
+- **Runtime adapter:** provider action code exists and is reachable through governed execution.
+- **Foundation:** contracts/data model exist but production execution is incomplete.
+- **Supported:** bounded execution exists with explicit configuration requirements.
+- **Production-ready:** reserved for paths that have been exercised against real provider accounts and deployment infrastructure.
+
+Do not equate a checked item with universal third-party provisioning.
