@@ -5,6 +5,7 @@ import io
 from datetime import date
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, HttpUrl
 import psycopg
@@ -35,6 +36,7 @@ from checkpoints import checkpoint_state
 from agent_gateway import catalog as agent_tool_catalog, resolve as resolve_agent_tool
 from provider_runtime import execute_integration, provider_status
 from blueprint_optimizer import propose
+from voice import voice_capabilities, disclosure_text, twilio_gather_twiml, twilio_stream_twiml, VOICE_MODES
 
 app = FastAPI(title="Luma API", version="0.8.0")
 
@@ -3380,3 +3382,130 @@ def charge_agent_budget(payload: dict):
               (payload["agent_name"],payload.get("project_id"),payload.get("workflow_run_id"),
                payload.get("agent_run_id"),amount,payload.get("category","model")))
             return {"charge":cur.fetchone(),"spent_usd":spent+amount,"budget_usd":budget}
+
+
+# --- Optional Voice ---
+
+@app.get("/voice/capabilities")
+def get_voice_capabilities():
+    return voice_capabilities()
+
+
+@app.post("/voice/sessions")
+def create_voice_session(payload: dict, request: Request):
+    mode=payload.get("mode","receptionist")
+    if mode not in VOICE_MODES:
+        raise HTTPException(status_code=400, detail="Unknown voice mode")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO voice_sessions
+                   (business_id,project_id,caller,mode,status,disclosed)
+                   VALUES (%s,%s,%s,%s,'active',false) RETURNING *""",
+                (payload.get("business_id"),payload.get("project_id"),payload.get("caller"),mode),
+            )
+            return cur.fetchone()
+
+
+@app.get("/voice/sessions/{session_id}")
+def get_voice_session(session_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM voice_sessions WHERE id=%s",(session_id,))
+            session=cur.fetchone()
+            if not session: raise HTTPException(status_code=404,detail="Voice session not found")
+            cur.execute("SELECT * FROM voice_turns WHERE session_id=%s ORDER BY sequence",(session_id,))
+            return {**session,"turns":cur.fetchall()}
+
+
+@app.post("/voice/sessions/{session_id}/turn")
+def record_voice_turn(session_id: str, payload: dict):
+    transcript=(payload.get("transcript") or "").strip()
+    speaker=payload.get("speaker","caller")
+    if not transcript: raise HTTPException(status_code=400,detail="transcript is required")
+    if speaker not in {"caller","assistant","system"}:
+        raise HTTPException(status_code=400,detail="invalid speaker")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id,status FROM voice_sessions WHERE id=%s",(session_id,))
+            session=cur.fetchone()
+            if not session: raise HTTPException(status_code=404,detail="Voice session not found")
+            if session["status"]!="active": raise HTTPException(status_code=409,detail="Voice session is not active")
+            cur.execute("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM voice_turns WHERE session_id=%s",(session_id,))
+            sequence=cur.fetchone()["sequence"]
+            cur.execute(
+                """INSERT INTO voice_turns(session_id,speaker,transcript,sequence,metadata)
+                   VALUES (%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+                (session_id,speaker,transcript,sequence,json.dumps(payload.get("metadata") or {})),
+            )
+            return cur.fetchone()
+
+
+@app.post("/voice/sessions/{session_id}/disclose")
+def disclose_voice_session(session_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE voice_sessions SET disclosed=true WHERE id=%s RETURNING id,disclosed",
+                (session_id,),
+            )
+            row=cur.fetchone()
+            if not row: raise HTTPException(status_code=404,detail="Voice session not found")
+            return {"session_id":row["id"],"disclosed":row["disclosed"],"text":disclosure_text()}
+
+
+@app.post("/voice/sessions/{session_id}/end")
+def end_voice_session(session_id: str, payload: dict):
+    reason=payload.get("reason","completed")
+    allowed={"user_requested","escalated","completed","provider_error","policy_blocked"}
+    if reason not in allowed: raise HTTPException(status_code=400,detail="invalid end reason")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE voice_sessions SET status=%s, escalation_reason=%s,
+                          ended_at=now() WHERE id=%s RETURNING *""",
+                (reason, payload.get("escalation_reason"), session_id),
+            )
+            row=cur.fetchone()
+            if not row: raise HTTPException(status_code=404,detail="Voice session not found")
+            return row
+
+
+@app.post("/voice/twilio/incoming")
+def twilio_incoming(request: Request):
+    # Use the real-time stream path when configured; otherwise use the
+    # compatibility speech-gather path.
+    stream_url=os.getenv("LUMA_VOICE_STREAM_URL")
+    if stream_url:
+        xml=twilio_stream_twiml(stream_url)
+    else:
+        action_url=str(request.base_url).rstrip("/")+"/voice/twilio/gather"
+        xml=twilio_gather_twiml(action_url, disclosure_text())
+    return Response(content=xml, media_type="application/xml")
+
+
+@app.post("/voice/twilio/gather")
+async def twilio_gather(request: Request):
+    form=await request.form()
+    transcript=(form.get("SpeechResult") or "").strip()
+    call_sid=form.get("CallSid")
+    # This endpoint persists the turn. A realtime/model bridge should generate
+    # the actual natural response and return TwiML/stream audio.
+    if transcript and DATABASE_URL:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM voice_sessions WHERE caller=%s AND status='active' ORDER BY started_at DESC LIMIT 1",
+                    (call_sid,),
+                )
+                session=cur.fetchone()
+                if session:
+                    cur.execute("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM voice_turns WHERE session_id=%s",(session["id"],))
+                    seq=cur.fetchone()["sequence"]
+                    cur.execute(
+                        """INSERT INTO voice_turns(session_id,speaker,transcript,sequence,metadata)
+                           VALUES (%s,'caller',%s,%s,%s::jsonb)""",
+                        (session["id"],transcript,seq,json.dumps({"call_sid":call_sid})),
+                    )
+    action_url=str(request.base_url).rstrip("/")+"/voice/twilio/gather"
+    return Response(content=twilio_gather_twiml(action_url,"Thanks. I heard you. I can continue by email, or the voice system can continue this conversation."),media_type="application/xml")
