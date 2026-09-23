@@ -85,3 +85,12 @@ The agent must:
 - send a post-call email summary when configured.
 
 A voice connection is not considered production-ready solely because audio flows. The production bar includes low latency, natural turn-taking, interruption handling, reliable escalation, governed actions, provider signature validation, monitoring, and tested failure behavior.
+
+
+## Production hardening
+
+The voice path now includes operator-approved E.164 test destinations, Twilio call lifecycle/status persistence, maximum-duration metadata, webhook signature validation, communication-policy primitives, and cancellation cleanup for the realtime bridge.
+
+Production rollout still requires real provider-account validation. In particular, validate the configured realtime model/event contract, public HTTPS/WSS routing, interruption behavior, latency, escalation, failure handling, and post-call email delivery with the actual accounts before marking the integration production-ready.
+
+Voice remains optional: clients can complete the entire Luma engagement through email and the portal.
