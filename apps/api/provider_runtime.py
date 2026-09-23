@@ -32,6 +32,8 @@ def load_credentials(integration):
         credentials={**credentials,**refreshed}
         if refreshed.get("refresh_token"):
             credentials["refresh_token"]=refreshed["refresh_token"]
+        if refreshed.get("expires_in"):
+            credentials["expires_at"]=time.time()+float(refreshed["expires_in"])
         backend().put(secret_ref,json.dumps(credentials))
     return credentials
 
@@ -40,7 +42,18 @@ def execute_integration(integration, capability, payload=None):
     adapter=get_adapter(integration["provider"],credentials)
     if capability=="health_check":
         return adapter.health_check()
-    return adapter.execute(capability,payload or {})
+    result=adapter.execute(capability,payload or {})
+    # Some providers revoke access without an explicit expiry. One retry after a
+    # refresh lets us recover from a stale access token while still surfacing
+    # persistent revocation to the caller.
+    if getattr(result,"status",None)=="error" and credentials.get("refresh_token"):
+        refreshed=refresh_request(integration["provider"],credentials["refresh_token"])
+        credentials={**credentials,**refreshed}
+        if refreshed.get("expires_in"):
+            credentials["expires_at"]=time.time()+float(refreshed["expires_in"])
+        backend().put(integration["secret_ref"],json.dumps(credentials))
+        result=get_adapter(integration["provider"],credentials).execute(capability,payload or {})
+    return result
 
 def provider_status(integration):
     try:
