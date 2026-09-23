@@ -175,3 +175,25 @@ Core control-plane and selected live provider runtime paths are implemented. Rem
 - **Production-ready:** reserved for paths that have been exercised against real provider accounts and deployment infrastructure.
 
 Do not equate a checked item with universal third-party provisioning.
+
+## Phase 13 — Optional Voice
+
+The client must never need to join a call. Email and the client portal remain the default communication path; voice is an optional interface into the same client/project context.
+
+- [x] Voice session control-plane model
+- [x] Conversation turn persistence
+- [x] AI disclosure requirement
+- [x] Voice modes and escalation states
+- [x] Twilio inbound webhook/TwiML compatibility path
+- [x] Real-time media-stream contract
+- [ ] Realtime speech/model bridge with barge-in and low-latency turn taking
+- [ ] Production telephony signature validation and provider-account tests
+- [ ] Natural-voice provider selection and quality evaluation
+- [ ] Conversation intelligence connected to governed tools
+- [ ] Automatic post-call email summary
+- [ ] Human escalation/transfer
+- [ ] Do-not-call and communication-preference enforcement at call ingress
+
+### Voice quality bar
+
+Luma Voice is not considered production-ready merely because speech-to-text and text-to-speech work. The production bar is natural turn-taking, interruption handling, low latency, context-aware answers, explicit AI disclosure, no fabricated commitments, governed actions, reliable escalation, and an email follow-up path.
