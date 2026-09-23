@@ -2601,6 +2601,10 @@ def execute_provider_action(integration_id: str, payload: dict, request: Request
                 "create_event":"create_event","send_message":"send_message","create_invoice":"charge_payment"}
     action=action_map.get(capability,"write_crm")
     principal=request.state.principal
+    import uuid
+    actor_id=principal.get("sub")
+    try: uuid.UUID(str(actor_id))
+    except Exception: actor_id=None
     if principal.get("role") in {"owner","admin","operator"}:
         allowed_scopes=["read","draft","write_crm","create_event","send_message","charge_payment","deploy"]
     elif principal.get("role")=="client":
@@ -2631,7 +2635,7 @@ def execute_provider_action(integration_id: str, payload: dict, request: Request
             status=result.status if hasattr(result,"status") else result.get("status","unknown")
             cur.execute("""INSERT INTO audit_log(actor_type,actor_id,action,entity_type,entity_id,metadata)
                            VALUES (%s,%s,'provider_action','integration_connection',%s,%s::jsonb)""",
-                        (principal.get("role","agent"),principal.get("sub"),integration_id,
+                        (principal.get("role","agent"),actor_id,integration_id,
                          json.dumps({"capability":capability,"status":status})))
             cur.execute("SELECT receipt_hash FROM agent_action_receipts ORDER BY created_at DESC LIMIT 1")
             previous=cur.fetchone()
@@ -2642,7 +2646,7 @@ def execute_provider_action(integration_id: str, payload: dict, request: Request
             cur.execute("""INSERT INTO agent_action_receipts
               (actor_type,actor_id,action,decision,risk,reason,previous_hash,receipt_hash,entity_type,entity_id,metadata)
               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
-              (principal.get("role","agent"),principal.get("sub"),action,decision.decision,decision.risk,decision.reason,
+              (principal.get("role","agent"),actor_id,action,decision.decision,decision.risk,decision.reason,
                receipt["previous_hash"],receipt["hash"],"integration_connection",integration_id,json.dumps(receipt["metadata"])))
     return {"executed":True,"decision":decision.__dict__,"receipt_hash":receipt["hash"],
             "result":result.__dict__ if hasattr(result,"__dict__") else result}
