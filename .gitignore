@@ -11,7 +11,4 @@ coverage/
 
 /data/delivery/
 /data/deploy/
-
-# Self-hosted Infisical local secrets
-infrastructure/infisical/.env
-infrastructure/infisical/volumes/
+/backups/

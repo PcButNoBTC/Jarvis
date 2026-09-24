@@ -1,4 +1,7 @@
-"""Revenue and operating-cost analytics for the Luma MVP."""
+"""Revenue, cost, and time analytics for Luma.
+
+Goal: know whether Luma is earning more than it costs in money and hours.
+"""
 from __future__ import annotations
 
 from decimal import Decimal
@@ -32,6 +35,13 @@ def revenue_summary(cur) -> dict:
     """)
     projects = cur.fetchone()
 
+    hours = 0.0
+    try:
+        cur.execute("SELECT COALESCE(SUM(hours),0) AS hours FROM time_entries")
+        hours = money(cur.fetchone()["hours"])
+    except Exception:
+        hours = 0.0
+
     paid = money(revenue["paid_revenue"])
     total_cost = money(costs)
     return {
@@ -43,6 +53,9 @@ def revenue_summary(cur) -> dict:
         "revenue_per_cost_dollar": (paid / total_cost) if total_cost else None,
         "won_projects": projects["won_projects"],
         "project_value": money(projects["project_value"]),
+        "hours_logged": hours,
+        "revenue_per_hour": (paid / hours) if hours else None,
+        "contribution_per_hour": ((paid - total_cost) / hours) if hours else None,
     }
 
 
@@ -74,3 +87,69 @@ def service_performance(cur) -> list[dict]:
             "revenue_per_cost_dollar": (revenue / costs) if costs else None,
         })
     return rows
+
+
+def time_summary(cur, project_id: str | None = None) -> dict:
+    if project_id:
+        cur.execute(
+            """SELECT COALESCE(SUM(hours),0) AS hours,
+                      COUNT(*) AS entries
+               FROM time_entries WHERE project_id=%s""",
+            (project_id,),
+        )
+    else:
+        cur.execute(
+            """SELECT COALESCE(SUM(hours),0) AS hours,
+                      COUNT(*) AS entries
+               FROM time_entries"""
+        )
+    row = cur.fetchone()
+    hours = money(row["hours"])
+    cur.execute(
+        """SELECT category, COALESCE(SUM(hours),0) AS hours
+           FROM time_entries
+           """
+        + ("WHERE project_id=%s " if project_id else "")
+        + "GROUP BY category ORDER BY hours DESC",
+        ((project_id,) if project_id else ()),
+    )
+    by_category = [{"category": r["category"], "hours": money(r["hours"])} for r in cur.fetchall()]
+    return {"hours": hours, "entries": row["entries"], "by_category": by_category}
+
+
+def cost_breakdown(cur) -> dict:
+    """Split costs into model/AI spend vs delivery/ops vs other."""
+    try:
+        cur.execute("""
+            SELECT
+              COALESCE(SUM(CASE WHEN category IN ('model','ai','llm','tokens') THEN amount ELSE 0 END),0) AS model_spend,
+              COALESCE(SUM(CASE WHEN category IN ('delivery','labor','hosting','software') THEN amount ELSE 0 END),0) AS delivery_cost,
+              COALESCE(SUM(CASE WHEN category NOT IN ('model','ai','llm','tokens','delivery','labor','hosting','software')
+                                 OR category IS NULL THEN amount ELSE 0 END),0) AS other_cost,
+              COALESCE(SUM(amount),0) AS total_cost
+            FROM cost_records
+        """)
+        row = cur.fetchone() or {}
+    except Exception:
+        row = {"model_spend": 0, "delivery_cost": 0, "other_cost": 0, "total_cost": 0}
+    paid = 0.0
+    try:
+        cur.execute("SELECT COALESCE(SUM(amount),0) AS paid FROM revenue_transactions WHERE status='paid'")
+        paid = money(cur.fetchone()["paid"])
+    except Exception:
+        pass
+    model = money(row.get("model_spend"))
+    delivery = money(row.get("delivery_cost"))
+    other = money(row.get("other_cost"))
+    total = money(row.get("total_cost"))
+    return {
+        "model_spend": model,
+        "delivery_cost": delivery,
+        "other_cost": other,
+        "total_cost": total,
+        "paid_revenue": paid,
+        "contribution_after_model": paid - model,
+        "contribution_after_all_costs": paid - total,
+        "revenue_per_model_dollar": (paid / model) if model else None,
+        "revenue_per_delivery_dollar": (paid / delivery) if delivery else None,
+    }
