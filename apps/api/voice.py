@@ -132,17 +132,25 @@ async def realtime_bridge(twilio_ws, public_url: str | None = None):
         raise RuntimeError("LUMA_REALTIME_API_KEY or OPENAI_API_KEY is required")
     separator="&" if "?" in realtime_url else "?"
     ws_url=realtime_url + separator + "model=" + model
-    headers={"Authorization":f"Bearer {api_key}","OpenAI-Beta":"realtime=v1"}
+    headers={"Authorization":f"Bearer {api_key}","OpenAI-Safety-Identifier":hashlib.sha256((os.getenv("LUMA_VOICE_SAFETY_ID") or "luma-voice").encode()).hexdigest()}
     async with websockets.connect(ws_url, additional_headers=headers, max_size=None, ping_interval=20, ping_timeout=20) as ai_ws:
         session_update={
             "type":"session.update",
             "session":{
+                "type":"realtime",
+                "model":model,
+                "output_modalities":["audio"],
                 "instructions":system_policy("receptionist")+" Speak naturally, briefly, and warmly. You are an AI and must disclose that. The caller can switch to email at any time.",
-                "modalities":["audio","text"],
-                "voice":os.getenv("LUMA_REALTIME_VOICE","marin"),
-                "input_audio_format":"g711_ulaw",
-                "output_audio_format":"g711_ulaw",
-                "turn_detection":{"type":"server_vad","create_response":True,"interrupt_response":True},
+                "audio":{
+                    "input":{
+                        "format":{"type":"audio/pcmu","rate":8000},
+                        "turn_detection":{"type":"server_vad","create_response":True,"interrupt_response":True},
+                    },
+                    "output":{
+                        "format":{"type":"audio/pcmu","rate":8000},
+                        "voice":os.getenv("LUMA_REALTIME_VOICE","marin"),
+                    },
+                },
             },
         }
         await ai_ws.send(json.dumps(session_update))
@@ -167,7 +175,7 @@ async def realtime_bridge(twilio_ws, public_url: str | None = None):
                 raw=await ai_ws.recv()
                 event=json.loads(raw)
                 kind=event.get("type","")
-                if kind=="response.audio.delta" and stream_sid:
+                if kind=="response.output_audio.delta" and stream_sid:
                     await twilio_ws.send_text(json.dumps({"event":"media","streamSid":stream_sid,"media":{"payload":event.get("delta","")}}))
                 elif kind=="input_audio_buffer.speech_started" and stream_sid:
                     await twilio_ws.send_text(json.dumps({"event":"clear","streamSid":stream_sid}))
