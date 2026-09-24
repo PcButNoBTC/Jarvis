@@ -120,6 +120,29 @@ def voice_capabilities() -> dict[str, Any]:
     }
 
 
+def realtime_session_config(model: str, voice: str = "marin") -> dict[str, Any]:
+    """Build the current GA Realtime session shape for Twilio PCMU audio."""
+    return {
+        "type": "session.update",
+        "session": {
+            "type": "realtime",
+            "model": model,
+            "output_modalities": ["audio"],
+            "instructions": system_policy("receptionist") + " Speak naturally, briefly, and warmly. You are an AI and must disclose that. The caller can switch to email at any time.",
+            "audio": {
+                "input": {
+                    "format": {"type": "audio/pcmu", "rate": 8000},
+                    "turn_detection": {"type": "server_vad", "create_response": True, "interrupt_response": True},
+                },
+                "output": {
+                    "format": {"type": "audio/pcmu", "rate": 8000},
+                    "voice": voice,
+                },
+            },
+        },
+    }
+
+
 async def realtime_bridge(twilio_ws, public_url: str | None = None):
     """Bridge Twilio bidirectional media to a configurable realtime speech model."""
     import json
@@ -134,25 +157,7 @@ async def realtime_bridge(twilio_ws, public_url: str | None = None):
     ws_url=realtime_url + separator + "model=" + model
     headers={"Authorization":f"Bearer {api_key}","OpenAI-Safety-Identifier":hashlib.sha256((os.getenv("LUMA_VOICE_SAFETY_ID") or "luma-voice").encode()).hexdigest()}
     async with websockets.connect(ws_url, additional_headers=headers, max_size=None, ping_interval=20, ping_timeout=20) as ai_ws:
-        session_update={
-            "type":"session.update",
-            "session":{
-                "type":"realtime",
-                "model":model,
-                "output_modalities":["audio"],
-                "instructions":system_policy("receptionist")+" Speak naturally, briefly, and warmly. You are an AI and must disclose that. The caller can switch to email at any time.",
-                "audio":{
-                    "input":{
-                        "format":{"type":"audio/pcmu","rate":8000},
-                        "turn_detection":{"type":"server_vad","create_response":True,"interrupt_response":True},
-                    },
-                    "output":{
-                        "format":{"type":"audio/pcmu","rate":8000},
-                        "voice":os.getenv("LUMA_REALTIME_VOICE","marin"),
-                    },
-                },
-            },
-        }
+        session_update=realtime_session_config(model, os.getenv("LUMA_REALTIME_VOICE","marin"))
         await ai_ws.send(json.dumps(session_update))
         stream_sid=None
         async def from_twilio():
