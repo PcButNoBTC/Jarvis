@@ -3627,7 +3627,7 @@ async def twilio_status(request: Request):
                                    status=CASE WHEN %s IN ('completed','canceled','failed','busy','no-answer') THEN 'completed' ELSE status END,
                                    ended_at=CASE WHEN %s IN ('completed','canceled','failed','busy','no-answer') THEN COALESCE(ended_at,now()) ELSE ended_at END
                                WHERE provider_call_id=%s""",
-                            (status,status,status,call_sid,call_sid))
+                            (status,status,status,call_sid))
     return {"ok":True,"call_sid":call_sid,"status":status}
 
 @app.post("/voice/twilio/gather")
