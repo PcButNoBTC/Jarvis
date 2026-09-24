@@ -196,6 +196,8 @@ The client must never need to join a call. Email and the client portal remain th
 - [x] Production webhook signature validation
 - [x] Operator-approved custom-number test-call endpoint
 - [x] E.164 destination validation and call lifecycle persistence
+- [x] Bounded Twilio call duration enforcement
+- [x] Provider call lifecycle correlation by provider call ID
 - [x] Do-not-call / preferred-channel policy primitives
 - [ ] Real provider-account test and realtime contract validation
 - [ ] Natural-voice quality evaluation against target latency/turn-taking
