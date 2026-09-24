@@ -1,19 +1,34 @@
-# First-client loop (operator run sheet)
+# First-client loop — earn and measure
 
-Print or keep open while serving the first client.
+Print this while chasing the first paid job.
 
-1. **Preflight** — `./scripts/preflight.sh` and `curl -s $API/ops/readiness | jq .launch_ready`
-2. **Ingest** — create business (name, website, email, industry)
-3. **Research** — queue research; wait for completion
-4. **Fit-check** — `POST /opportunities/{id}/fit-check` — stop if not fit
-5. **Brief** — `POST /opportunities/{id}/client-brief` — send only `share_text`
-6. **Discovery** — 10–15 min call; soft CTA; easy no
-7. **Proposal** — scoped offer; accept → project
-8. **Configure** — project options for the service
-9. **Generate** — delivery package; complete OPERATOR-QA.md
-10. **Portal** — create access; client approves
-11. **Activate / handoff** — only after acceptance
-12. **Measure** — `POST /time-entries`; record paid revenue
-13. **Backup** — `./scripts/backup-db.sh` after the job is closed
+## Setup (once)
 
-Tone: evidence only, no pressure, client owns logins.
+1. `./scripts/preflight.sh` — secrets OK  
+2. `curl -s $API/ops/readiness` — `production_ready_core` true  
+3. SMTP test **or** plan to share briefs manually  
+4. Optional: one OAuth CONNECTED  
+
+## Pipeline → cash
+
+1. **Ingest** — local business with real website  
+2. **Research** — wait for signals  
+3. **Fit-check** — stop if not fit (protects reputation and time)  
+4. **Brief** — `share_text` only; soft CTA; no fake urgency  
+5. **Call** — 10–15 min; confirm problem and budget band  
+6. **Proposal** — AI Website $750–$3,000; fixed bullets; deposit  
+7. **Win** — accept → project  
+8. **Configure + generate** — package; finish OPERATOR-QA  
+9. **Portal** — client approves  
+10. **Get paid** — deposit/full; mark revenue **paid** in Luma  
+11. **Log hours** — every block of work  
+12. **Backup** — `./scripts/backup-db.sh`  
+
+## Profit check (end of job)
+
+- [ ] Revenue status = paid  
+- [ ] Hours logged  
+- [ ] Revenue ÷ hours ≥ your minimum (e.g. $100/hr)  
+- [ ] Client would refer you  
+
+If hours exploded: cut scope next time, not ethics.
