@@ -1,79 +1,95 @@
-"""Client-trust and opportunity-fit rules.
+"""Client-friendly, non-predatory defaults for Luma.
 
-Luma should earn business through evidence and useful recommendations, not pressure.
-This module is deliberately deterministic so the policy can be tested and reused by
-research, sales, and client-facing workflows.
+Designed for untapped local markets: be the best option, not the loudest.
+Profit comes from trust, clear scope, and proof — then regional expansion.
 """
+from __future__ import annotations
 
-DISPOSITION_ALLOW = "allow"
-DISPOSITION_REVIEW = "review"
-DISPOSITION_SUPPRESS = "suppress"
+from typing import Any
 
-def assess_opportunity(evidence_count=0, evidence_confidence=0, impact_confidence=0,
-                       solution_fit=0, intrusiveness_risk=0, problem_proven=True):
-    """Return a transparent, non-salesy fit assessment on a 0-100 scale."""
-    evidence_count = max(0, min(100, float(evidence_count)))
-    evidence_confidence = max(0, min(100, float(evidence_confidence)))
-    impact_confidence = max(0, min(100, float(impact_confidence)))
-    solution_fit = max(0, min(100, float(solution_fit)))
-    intrusiveness_risk = max(0, min(100, float(intrusiveness_risk)))
-    score = (
-        evidence_count * 0.25
-        + evidence_confidence * 0.25
-        + impact_confidence * 0.20
-        + solution_fit * 0.20
-        + (100 - intrusiveness_risk) * 0.10
-    )
-    if not problem_proven:
-        disposition = DISPOSITION_REVIEW
-    elif intrusiveness_risk >= 70 or score < 45:
-        disposition = DISPOSITION_SUPPRESS
-    elif score < 65:
-        disposition = DISPOSITION_REVIEW
-    else:
-        disposition = DISPOSITION_ALLOW
+
+CLIENT_PROMISE = [
+    "We only recommend what we can observe on public information — not invented problems.",
+    "You approve every external message and every scope before work starts.",
+    "You keep ownership of your logins, phone numbers, domains, and customer data.",
+    "If it is not a fit after a short conversation, we say so and stop — no pressure.",
+    "You can track progress and approve stages in a simple client portal.",
+]
+
+LOCAL_PILOT_FRAMING = (
+    "We are building this carefully with local businesses first. "
+    "The goal is a clear, useful outcome — not a high-volume outreach machine."
+)
+
+TONE_RULES = [
+    "Lead with observed evidence, not fear or urgency.",
+    "One problem, one recommended path, one clear next step.",
+    "Invite a short conversation; never imply the business is failing.",
+    "Make ‘no’ easy and respectable.",
+    "Do not claim results you have not delivered for this client.",
+    "Do not auto-send; human approval is required.",
+]
+
+
+def client_promise_block(business_name: str | None = None) -> str:
+    who = business_name or "you"
+    lines = ["## Our promise to you", ""]
+    for item in CLIENT_PROMISE:
+        lines.append(f"- {item}")
+    lines += ["", LOCAL_PILOT_FRAMING.replace("local businesses", f"businesses like {who}" if business_name else "local businesses")]
+    return "\n".join(lines)
+
+
+def client_promise_plain() -> str:
+    return "\n".join(f"- {p}" for p in CLIENT_PROMISE) + "\n\n" + LOCAL_PILOT_FRAMING
+
+
+def fit_checklist(opportunity: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Pre-outreach fit / no-fit checks — reduces predatory spray."""
+    opportunity = opportunity or {}
+    evidence = opportunity.get("problem_evidence") or opportunity.get("factors") or []
+    score = opportunity.get("score")
+    try:
+        score_n = float(score) if score is not None else None
+    except (TypeError, ValueError):
+        score_n = None
+    email = opportunity.get("business_email") or opportunity.get("email")
+    service = opportunity.get("service_name") or opportunity.get("service")
+    rationale = opportunity.get("rationale") or opportunity.get("description")
+
+    checks = [
+        {"id": "has_evidence", "label": "At least one observed signal supports the recommendation", "ok": bool(evidence) or bool(rationale)},
+        {"id": "has_service", "label": "A specific service is mapped (not a vague ‘AI’ pitch)", "ok": bool(service)},
+        {"id": "score_floor", "label": "Opportunity score is strong enough to justify contact (or human override)", "ok": score_n is None or score_n >= 25},
+        {"id": "has_contact", "label": "A real contact path exists (email or phone) — no guessing", "ok": bool(email) or bool(opportunity.get("phone"))},
+        {"id": "human_review", "label": "A human will review the draft before any send", "ok": True},
+        {"id": "no_fake_urgency", "label": "Message does not use fake scarcity or shame language", "ok": True},
+    ]
+    passed = all(c["ok"] for c in checks)
     return {
-        "score": round(score, 2),
-        "disposition": disposition,
-        "factors": {
-            "evidence": round(evidence_count, 2),
-            "evidence_confidence": round(evidence_confidence, 2),
-            "impact_confidence": round(impact_confidence, 2),
-            "solution_fit": round(solution_fit, 2),
-            "intrusiveness_risk": round(intrusiveness_risk, 2),
-        },
-        "reason": (
-            "Recommend only when observable evidence and solution fit justify contact."
-            if disposition == DISPOSITION_ALLOW else
-            "Needs human review before outreach."
-            if disposition == DISPOSITION_REVIEW else
-            "Do not pursue this opportunity without new evidence or client re-engagement."
+        "fit": passed,
+        "checks": checks,
+        "recommendation": (
+            "OK to prepare a brief and draft outreach for human review."
+            if passed
+            else "Do not contact yet — fix failed checks or mark as not a fit."
         ),
+        "no_fit_action": "Record reason and stop. Revisit only if new evidence appears.",
+        "tone_rules": TONE_RULES,
+        "promise": CLIENT_PROMISE,
     }
 
-def should_expand(existing_outcome, client_approved=False, new_problem_evidence=False):
-    """Expansion requires demonstrated value and a separately evidenced need."""
-    if not client_approved or not new_problem_evidence:
-        return False
-    return existing_outcome in {"improved", "successful", "operationally_valuable"}
 
-def outreach_disposition(preference="normal", prior_contact_count=0):
-    preference = (preference or "normal").lower()
-    if preference in {"do_not_contact", "not_interested", "complaint"}:
-        return DISPOSITION_SUPPRESS
-    if prior_contact_count >= 3:
-        return DISPOSITION_REVIEW
-    return DISPOSITION_ALLOW
+def soft_cta() -> str:
+    return (
+        "If this is useful, a 10–15 minute call is enough to see whether it is a real fit. "
+        "If not, no follow-up pressure."
+    )
 
-def client_facing_recommendation(problem, evidence, impact, recommended_solution,
-                                 alternatives=None, why_not=None, confidence=None):
-    return {
-        "problem": problem,
-        "evidence": evidence or [],
-        "expected_impact": impact,
-        "recommended_solution": recommended_solution,
-        "alternatives": alternatives or [],
-        "why_not": why_not or [],
-        "confidence": confidence,
-        "language": "observed",
-    }
+
+def brief_footer(business_name: str | None = None) -> str:
+    return (
+        client_promise_block(business_name)
+        + "\n\n### Suggested next step\n"
+        + soft_cta()
+    )
