@@ -60,3 +60,9 @@ def test_realtime_session_uses_current_ga_contract():
     assert session["output_modalities"] == ["audio"]
     assert session["audio"]["input"]["format"] == {"type": "audio/pcmu", "rate": 8000}
     assert session["audio"]["output"]["format"] == {"type": "audio/pcmu", "rate": 8000}
+
+
+def test_voice_destination_policy_is_explicit():
+    from apps.api.voice import communication_policy
+    assert communication_policy(do_not_call=False, preferred_channel="phone")["voice_allowed"] is True
+    assert communication_policy(do_not_call=True, preferred_channel="email")["voice_allowed"] is False
