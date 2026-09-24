@@ -66,3 +66,9 @@ def test_voice_destination_policy_is_explicit():
     from apps.api.voice import communication_policy
     assert communication_policy(do_not_call=False, preferred_channel="phone")["voice_allowed"] is True
     assert communication_policy(do_not_call=True, preferred_channel="email")["voice_allowed"] is False
+
+
+def test_voice_communication_policy_respects_preferred_channel():
+    assert communication_policy(preferred_channel="email")["voice_allowed"] is False
+    assert communication_policy(preferred_channel="sms")["voice_allowed"] is False
+    assert communication_policy(preferred_channel="voice")["voice_allowed"] is True
