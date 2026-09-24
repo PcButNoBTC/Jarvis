@@ -15,7 +15,13 @@ END_REASONS = {"user_requested", "escalated", "completed", "provider_error", "po
 E164_RE = re.compile(r"^\+[1-9]\d{7,14}$")
 
 def communication_policy(*, do_not_call: bool = False, preferred_channel: str = "email") -> dict[str, Any]:
-    return {"do_not_call": bool(do_not_call), "preferred_channel": preferred_channel or "email", "voice_allowed": not bool(do_not_call)}
+    channel = (preferred_channel or "email").strip().lower()
+    voice_allowed = not bool(do_not_call) and channel in {"", "phone", "voice"}
+    return {
+        "do_not_call": bool(do_not_call),
+        "preferred_channel": channel or "email",
+        "voice_allowed": voice_allowed,
+    }
 
 def validate_destination(number: str) -> str:
     value=(number or "").strip()
