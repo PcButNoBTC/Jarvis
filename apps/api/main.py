@@ -3448,6 +3448,10 @@ def voice_test_call(payload: dict, request: Request):
         raise HTTPException(status_code=400,detail="to is required in E.164 format")
     if payload.get("approved") is not True:
         raise HTTPException(status_code=400,detail="Explicit approved=true is required")
+    if payload.get("do_not_call") is True:
+        raise HTTPException(status_code=409,detail="Destination is marked do-not-call")
+    if (payload.get("preferred_channel") or "").lower() not in {"", "phone", "voice"}:
+        raise HTTPException(status_code=409,detail="Destination prefers a non-voice channel")
     decision=evaluate_action(
         "place_call",
         tools=["voice"],
@@ -3473,7 +3477,8 @@ def voice_test_call(payload: dict, request: Request):
             "place_call",
             {"to":to,"from":payload.get("from") or os.getenv("TWILIO_FROM_NUMBER"),
              "url":payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/incoming"),
-             "status_callback":payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/status")
+             "status_callback":payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/status"),
+             "time_limit_seconds":max(1,min(int(payload.get("max_duration_seconds") or os.getenv("LUMA_VOICE_MAX_DURATION_SECONDS","1800")),14400))
         )
     except Exception as exc:
         raise HTTPException(status_code=502,detail=f"Voice provider error: {type(exc).__name__}")
@@ -3621,7 +3626,7 @@ async def twilio_status(request: Request):
                                SET last_provider_status=%s,
                                    status=CASE WHEN %s IN ('completed','canceled','failed','busy','no-answer') THEN 'completed' ELSE status END,
                                    ended_at=CASE WHEN %s IN ('completed','canceled','failed','busy','no-answer') THEN COALESCE(ended_at,now()) ELSE ended_at END
-                               WHERE provider_call_id=%s OR caller=%s""",
+                               WHERE provider_call_id=%s""",
                             (status,status,status,call_sid,call_sid))
     return {"ok":True,"call_sid":call_sid,"status":status}
 
@@ -3638,7 +3643,7 @@ async def twilio_gather(request: Request):
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT id FROM voice_sessions WHERE caller=%s AND status='active' ORDER BY started_at DESC LIMIT 1",
+                    "SELECT id FROM voice_sessions WHERE provider_call_id=%s AND status='active' ORDER BY started_at DESC LIMIT 1",
                     (call_sid,),
                 )
                 session=cur.fetchone()
