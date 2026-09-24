@@ -6,6 +6,7 @@ from apps.api.voice import (
     twilio_gather_twiml,
     twilio_stream_twiml,
     validate_twilio_signature,
+    realtime_session_config,
 )
 
 
@@ -50,3 +51,12 @@ def test_voice_destination_requires_e164():
     import pytest
     with pytest.raises(ValueError):
         validate_destination("555-123-4567")
+
+
+def test_realtime_session_uses_current_ga_contract():
+    config = realtime_session_config("gpt-realtime-2.1", "marin")
+    session = config["session"]
+    assert session["type"] == "realtime"
+    assert session["output_modalities"] == ["audio"]
+    assert session["audio"]["input"]["format"] == {"type": "audio/pcmu", "rate": 8000}
+    assert session["audio"]["output"]["format"] == {"type": "audio/pcmu", "rate": 8000}
