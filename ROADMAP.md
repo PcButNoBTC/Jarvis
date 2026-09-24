@@ -176,6 +176,11 @@ Core control-plane and selected live provider runtime paths are implemented. Rem
 
 Do not equate a checked item with universal third-party provisioning.
 
+## Production release gate
+
+- [x] Production readiness runbook and explicit release verification gate
+- [x] Liveness/readiness separation and baseline security response headers
+
 ## Phase 13 — Optional Voice
 
 The client must never need to join a call. Email and the client portal remain the default communication path; voice is an optional interface into the same client/project context.
@@ -187,6 +192,7 @@ The client must never need to join a call. Email and the client portal remain th
 - [x] Twilio inbound webhook/TwiML compatibility path
 - [x] Real-time media-stream contract
 - [x] Realtime speech/model bridge foundation with interruption handling
+- [x] Realtime GA WebSocket session/audio event contract aligned
 - [x] Production webhook signature validation
 - [x] Operator-approved custom-number test-call endpoint
 - [x] E.164 destination validation and call lifecycle persistence
