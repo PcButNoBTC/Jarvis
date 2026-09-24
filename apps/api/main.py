@@ -3479,6 +3479,7 @@ def voice_test_call(payload: dict, request: Request):
              "url":payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/incoming"),
              "status_callback":payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/status"),
              "time_limit_seconds":max(1,min(int(payload.get("max_duration_seconds") or os.getenv("LUMA_VOICE_MAX_DURATION_SECONDS","1800")),14400))
+            }
         )
     except Exception as exc:
         raise HTTPException(status_code=502,detail=f"Voice provider error: {type(exc).__name__}")
