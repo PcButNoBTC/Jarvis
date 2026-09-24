@@ -89,6 +89,19 @@ async def api_key_guard(request: Request, call_next):
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if request.url.path.startswith("/docs") or request.url.path.startswith("/redoc") or request.url.path == "/openapi.json":
+        return response
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
 def bootstrap_service_blueprints():
     from service_blueprints import blueprint
     with get_conn() as conn:
@@ -194,6 +207,28 @@ class ProjectOptionUpdate(BaseModel):
 @app.get("/")
 def root():
     return {"name": "Luma", "version": "0.8.0", "status": "running"}
+
+
+@app.get("/ready")
+def ready():
+    """Readiness probe: only succeeds when the database is reachable and required production configuration exists."""
+    checks = {}
+    if not DATABASE_URL:
+        checks["database"] = "not_configured"
+    else:
+        try:
+            with psycopg.connect(DATABASE_URL, connect_timeout=2) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    checks["database"] = "ok" if cur.fetchone() == (1,) else "error"
+        except Exception as exc:
+            checks["database"] = f"error: {type(exc).__name__}"
+    checks["auth_secret"] = "ok" if os.getenv("LUMA_AUTH_SECRET") else "missing"
+    checks["production_deploy_root"] = "ok" if os.getenv("LUMA_DEPLOY_ROOT") else "missing"
+    ok = checks["database"] == "ok" and checks["auth_secret"] == "ok" and checks["production_deploy_root"] == "ok"
+    if not ok:
+        return JSONResponse(status_code=503, content={"status":"not_ready","checks":checks})
+    return {"status":"ready","checks":checks}
 
 
 @app.get("/health")
