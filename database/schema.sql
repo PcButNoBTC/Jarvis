@@ -647,3 +647,197 @@ ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS provider_account_id
 ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 ALTER TABLE integration_connections ADD COLUMN IF NOT EXISTS last_health_check_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_integration_connections_secret_ref ON integration_connections(secret_ref);
+\n-- Luma Control & Intelligence Core
+CREATE TABLE IF NOT EXISTS evidence_claims (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id UUID REFERENCES businesses(id) ON DELETE CASCADE,
+  research_report_id UUID REFERENCES research_reports(id) ON DELETE SET NULL,
+  opportunity_id UUID REFERENCES opportunities(id) ON DELETE SET NULL,
+  claim TEXT NOT NULL,
+  evidence_strength NUMERIC(5,2) NOT NULL DEFAULT 0,
+  alternatives JSONB NOT NULL DEFAULT '[]',
+  verified_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_claims_opportunity ON evidence_claims(opportunity_id, verified_at DESC);
+
+CREATE TABLE IF NOT EXISTS claim_evidence (
+  claim_id UUID NOT NULL REFERENCES evidence_claims(id) ON DELETE CASCADE,
+  evidence_id UUID NOT NULL REFERENCES evidence_items(id) ON DELETE CASCADE,
+  relation TEXT NOT NULL DEFAULT 'supports',
+  PRIMARY KEY (claim_id, evidence_id, relation)
+);
+
+CREATE TABLE IF NOT EXISTS agent_action_receipts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
+  actor_type TEXT NOT NULL,
+  actor_id UUID,
+  action TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  risk TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  estimated_cost NUMERIC(12,6) NOT NULL DEFAULT 0,
+  previous_hash TEXT,
+  receipt_hash TEXT NOT NULL,
+  entity_type TEXT,
+  entity_id UUID,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_receipts_entity ON agent_action_receipts(entity_type, entity_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_checkpoints (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_run_id UUID NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  step TEXT NOT NULL,
+  state JSONB NOT NULL DEFAULT '{}',
+  checkpoint_hash TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_checkpoints_run ON workflow_checkpoints(workflow_run_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS service_blueprint_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  service_id UUID REFERENCES services(id) ON DELETE CASCADE,
+  version INT NOT NULL DEFAULT 1,
+  blueprint JSONB NOT NULL DEFAULT '{}',
+  active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(service_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS agent_budget_ledger (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_name TEXT NOT NULL,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  workflow_run_id UUID REFERENCES workflow_runs(id) ON DELETE SET NULL,
+  agent_run_id UUID REFERENCES agent_runs(id) ON DELETE SET NULL,
+  amount NUMERIC(12,6) NOT NULL DEFAULT 0,
+  category TEXT NOT NULL DEFAULT 'model',
+  occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_budget_ledger_agent ON agent_budget_ledger(agent_name, occurred_at DESC);
+
+CREATE TABLE IF NOT EXISTS client_metric_snapshots (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  metric_name TEXT NOT NULL,
+  value NUMERIC(14,4),
+  unit TEXT,
+  source TEXT,
+  client_confirmed BOOLEAN NOT NULL DEFAULT false,
+  captured_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_client_metric_snapshots_project ON client_metric_snapshots(project_id, metric_name, captured_at DESC);
+
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS checkpoint_version INT NOT NULL DEFAULT 0;
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS budget_usd NUMERIC(12,4);
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS spent_usd NUMERIC(12,6) NOT NULL DEFAULT 0;
+ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS waiting_for_approval BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE agent_policies ADD COLUMN IF NOT EXISTS max_tool_calls INT NOT NULL DEFAULT 100;
+ALTER TABLE agent_policies ADD COLUMN IF NOT EXISTS max_tokens INT;
+ALTER TABLE agent_policies ADD COLUMN IF NOT EXISTS risk_policy JSONB NOT NULL DEFAULT '{}';
+
+-- Agent gateway, trajectory evaluation and security observability
+CREATE TABLE IF NOT EXISTS agent_trajectory_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_run_id UUID REFERENCES agent_runs(id) ON DELETE CASCADE,
+  sequence INT NOT NULL,
+  event_type TEXT NOT NULL,
+  action TEXT,
+  input JSONB NOT NULL DEFAULT '{}',
+  output JSONB NOT NULL DEFAULT '{}',
+  decision TEXT,
+  latency_ms INT,
+  cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_agent_trajectory_run ON agent_trajectory_events(agent_run_id, sequence);
+CREATE TABLE IF NOT EXISTS security_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  actor_type TEXT,
+  actor_id UUID,
+  event_type TEXT NOT NULL,
+  severity TEXT NOT NULL DEFAULT 'info',
+  entity_type TEXT,
+  entity_id UUID,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS security_rate_limits (
+  bucket_key TEXT NOT NULL,
+  window_start TIMESTAMPTZ NOT NULL,
+  request_count INT NOT NULL DEFAULT 0,
+  PRIMARY KEY(bucket_key,window_start)
+);
+CREATE INDEX IF NOT EXISTS idx_security_rate_limits_window ON security_rate_limits(window_start);
+
+CREATE TABLE IF NOT EXISTS blueprint_optimization_proposals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  service_id UUID REFERENCES services(id) ON DELETE SET NULL,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  source_metric TEXT NOT NULL,
+  before_value NUMERIC(14,4),
+  after_value NUMERIC(14,4),
+  delta NUMERIC(14,4),
+  recommendation JSONB NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'proposed',
+  approved_by UUID,
+  approved_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_blueprint_optimization_status ON blueprint_optimization_proposals(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS oauth_state_nonces (
+  nonce TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  project_id UUID NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_oauth_state_nonces_expiry ON oauth_state_nonces(expires_at);
+
+
+-- Conversational voice sessions. Voice is optional; email/portal remain the canonical async path.
+CREATE TABLE IF NOT EXISTS voice_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id UUID REFERENCES businesses(id) ON DELETE SET NULL,
+  project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  caller TEXT,
+  mode TEXT NOT NULL DEFAULT 'receptionist',
+  status TEXT NOT NULL DEFAULT 'active',
+  disclosed BOOLEAN NOT NULL DEFAULT false,
+  escalation_reason TEXT,
+  facts JSONB NOT NULL DEFAULT '{}',
+  pending_actions JSONB NOT NULL DEFAULT '[]',
+  started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ended_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_status ON voice_sessions(status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS voice_turns (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id UUID NOT NULL REFERENCES voice_sessions(id) ON DELETE CASCADE,
+  speaker TEXT NOT NULL,
+  transcript TEXT NOT NULL,
+  sequence INT NOT NULL,
+  metadata JSONB NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_voice_turns_session ON voice_turns(session_id, sequence);
+
+-- Voice provider lifecycle and compliance metadata.
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS provider TEXT;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS provider_call_id TEXT;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS caller_consent BOOLEAN;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS do_not_call BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS preferred_channel TEXT NOT NULL DEFAULT 'email';
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS last_provider_status TEXT;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS post_call_summary_sent BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE voice_sessions ADD COLUMN IF NOT EXISTS max_duration_seconds INT NOT NULL DEFAULT 1800;
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_provider_call ON voice_sessions(provider, provider_call_id);
+CREATE INDEX IF NOT EXISTS idx_voice_sessions_dnc ON voice_sessions(do_not_call, started_at DESC);

@@ -3,8 +3,9 @@ import json
 import csv
 import io
 from datetime import date
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, HttpUrl
 import psycopg
@@ -26,24 +27,109 @@ from oauth import authorization_url, verify_state, token_request
 from client_trust import assess_opportunity, outreach_disposition, should_expand
 from secret_backend import backend as secret_backend
 from provider_adapters import get_adapter
+from evidence_engine import build_claim, evidence_strength
+from policy_engine import evaluate_action, normalize_policy
+from economics import unit_economics
+from service_blueprints import blueprint, instantiate
+from action_receipts import make_receipt
+from checkpoints import checkpoint_state
+from agent_gateway import catalog as agent_tool_catalog, resolve as resolve_agent_tool
+from provider_runtime import execute_integration, provider_status
+from blueprint_optimizer import propose
+from voice import voice_capabilities, disclosure_text, twilio_gather_twiml, twilio_stream_twiml, validate_twilio_signature, realtime_bridge, VOICE_MODES, validate_destination
 
 app = FastAPI(title="Luma API", version="0.8.0")
 
 
 @app.middleware("http")
 async def api_key_guard(request: Request, call_next):
-    if request.url.path in PUBLIC_PATHS:
+    path=request.url.path
+    if path in PUBLIC_PATHS and path not in {"/auth/login","/integrations/oauth"}:
         return await call_next(request)
+
     api_key=request.headers.get("X-Luma-Key")
     authorization=request.headers.get("Authorization","")
     bearer=authorization[7:] if authorization.lower().startswith("bearer ") else None
     principal=authenticate(api_key,bearer)
-    if not principal:
+    if not principal and path not in {"/auth/login"} and not path.startswith("/integrations/oauth/"):
         return JSONResponse(status_code=401, content={"detail":"Authentication required"})
-    request.state.principal=principal
+
+    # PostgreSQL-backed fixed windows are shared by every API replica.
+    # The limiter is route-aware for public auth/OAuth endpoints and identity-aware
+    # after authentication. Forwarded headers are intentionally ignored here.
+    if DATABASE_URL and path != "/health":
+        import time
+        from datetime import datetime, timezone, timedelta
+        is_auth=path=="/auth/login"
+        is_oauth=path.startswith("/integrations/oauth/")
+        limit=int(os.getenv("LUMA_RATE_LIMIT_AUTH_PER_MINUTE" if is_auth else "LUMA_RATE_LIMIT_OAUTH_PER_MINUTE" if is_oauth else "LUMA_RATE_LIMIT_PER_MINUTE","10" if is_auth else "30" if is_oauth else "120"))
+        identity=(principal or {}).get("sub") or (request.client.host if request.client else "unknown")
+        bucket_key=f"{path.split('/')[1]}:{identity}:{request.client.host if request.client else 'unknown'}"
+        bucket_start=datetime.fromtimestamp(int(time.time())//60*60,tz=timezone.utc)
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""INSERT INTO security_rate_limits(bucket_key,window_start,request_count)
+                                   VALUES (%s,%s,1)
+                                   ON CONFLICT (bucket_key,window_start)
+                                   DO UPDATE SET request_count=security_rate_limits.request_count+1
+                                   RETURNING request_count""",(bucket_key,bucket_start))
+                    count=cur.fetchone()["request_count"]
+                    cur.execute("DELETE FROM security_rate_limits WHERE window_start < %s",
+                                (bucket_start-timedelta(minutes=10),))
+                    if count > limit:
+                        return JSONResponse(status_code=429,content={"detail":"Rate limit exceeded","retry_after_seconds":60})
+        except Exception:
+            if os.getenv("LUMA_RATE_LIMIT_FAIL_CLOSED","true").lower()=="true":
+                return JSONResponse(status_code=503,content={"detail":"Rate limiter unavailable"})
+    if principal:
+        request.state.principal=principal
     return await call_next(request)
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if request.url.path.startswith("/docs") or request.url.path.startswith("/redoc") or request.url.path == "/openapi.json":
+        return response
+    response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+def bootstrap_service_blueprints():
+    from service_blueprints import blueprint
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id,name FROM services WHERE active=true")
+            for service in cur.fetchall():
+                try:
+                    data=blueprint(service["name"])
+                except ValueError:
+                    continue
+                cur.execute(
+                    """INSERT INTO service_blueprint_versions(service_id,version,blueprint,active)
+                       VALUES (%s,1,%s::jsonb,true)
+                       ON CONFLICT (service_id,version) DO NOTHING""",
+                    (service["id"], json.dumps(data)),
+                )
+
+def bootstrap_agent_policies():
+    from agent_layer import AGENTS
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for name, definition in AGENTS.items():
+                cur.execute(
+                    """INSERT INTO agent_policies(agent_name,budget_usd,tools,approval_required)
+                       VALUES (%s,%s,%s::jsonb,%s)
+                       ON CONFLICT (agent_name) DO NOTHING""",
+                    (name, definition["default_budget"], json.dumps(definition["tools"]), definition["approval_required"]),
+                )
 
 def bootstrap_owner():
     email=os.getenv("LUMA_ADMIN_EMAIL")
@@ -65,6 +151,8 @@ def startup():
         try:
             ensure_delivery_schema()
             bootstrap_owner()
+            bootstrap_agent_policies()
+            bootstrap_service_blueprints()
         except Exception as exc:
             print(f"[luma] startup initialization failed: {type(exc).__name__}: {exc}", flush=True)
 
@@ -119,6 +207,28 @@ class ProjectOptionUpdate(BaseModel):
 @app.get("/")
 def root():
     return {"name": "Luma", "version": "0.8.0", "status": "running"}
+
+
+@app.get("/ready")
+def ready():
+    """Readiness probe: only succeeds when the database is reachable and required production configuration exists."""
+    checks = {}
+    if not DATABASE_URL:
+        checks["database"] = "not_configured"
+    else:
+        try:
+            with psycopg.connect(DATABASE_URL, connect_timeout=2) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    checks["database"] = "ok" if cur.fetchone() == (1,) else "error"
+        except Exception as exc:
+            checks["database"] = f"error: {type(exc).__name__}"
+    checks["auth_secret"] = "ok" if os.getenv("LUMA_AUTH_SECRET") else "missing"
+    checks["production_deploy_root"] = "ok" if os.getenv("LUMA_DEPLOY_ROOT") else "missing"
+    ok = checks["database"] == "ok" and checks["auth_secret"] == "ok" and checks["production_deploy_root"] == "ok"
+    if not ok:
+        return JSONResponse(status_code=503, content={"status":"not_ready","checks":checks})
+    return {"status":"ready","checks":checks}
 
 
 @app.get("/health")
@@ -324,13 +434,18 @@ def advance_workflow_run(run_id: str, payload: dict):
                 step = next_step(run["workflow_name"], run["current_step"])
             except ValueError as exc:
                 raise HTTPException(status_code=409, detail=str(exc))
-            status = payload.get("status") or ("completed" if step is None else "running")
+            from workflows import is_approval_step
+            waiting = bool(step and is_approval_step(run["workflow_name"], step) and payload.get("approved") is not True)
+            if waiting:
+                status = "awaiting_approval"
+            else:
+                status = payload.get("status") or ("completed" if step is None else "running")
             cur.execute(
                 """UPDATE workflow_runs
-                   SET current_step=%s, status=%s, output=%s::jsonb,
+                   SET current_step=%s, status=%s, waiting_for_approval=%s, output=%s::jsonb,
                        completed_at=CASE WHEN %s='completed' THEN now() ELSE completed_at END
                    WHERE id=%s RETURNING *""",
-                (step, status, json.dumps(payload.get("output") or {}), status, run_id),
+                (step, status, waiting, json.dumps(payload.get("output") or {}), status, run_id),
             )
             return cur.fetchone()
 
@@ -1939,12 +2054,16 @@ def save_launch_settings(project_id: str, payload: LaunchSettingsUpdate):
             return result
 
 @app.post("/projects/{project_id}/deploy")
-def deploy_project_delivery(project_id: str):
+def deploy_project_delivery(project_id: str, request: Request):
     with get_conn() as conn:
         with conn.cursor() as cur:
             project, implementation = _delivery_project(cur, project_id)
             if implementation["status"] != "approved":
                 raise HTTPException(status_code=409, detail="Project must be approved before deployment")
+            principal=request.state.principal
+            decision=evaluate_action("deploy",tools=["deploy"],approval_required=True,approved=True)
+            if decision.decision!="allow":
+                raise HTTPException(status_code=403,detail=decision.reason)
             cur.execute("SELECT settings FROM launch_settings WHERE project_id=%s", (project_id,))
             launch_row = cur.fetchone()
             launch_settings = launch_row["settings"] if launch_row else {}
@@ -1979,7 +2098,7 @@ def deploy_project_delivery(project_id: str):
                     (project_id,),
                 )
                 project = cur.fetchone()
-                return {"project": project, "implementation": implementation, "deployment": cur.fetchone() if False else result}
+                return {"project": project, "implementation": implementation, "deployment": result,"governance":decision.__dict__}
     except Exception as exc:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -2505,22 +2624,93 @@ def portal_revision(project_id: str, token: str, payload: dict):
             return revision
 
 
+@app.post("/integrations/{integration_id}/execute")
+def execute_provider_action(integration_id: str, payload: dict, request: Request):
+    capability=payload.get("capability")
+    if not capability: raise HTTPException(status_code=400,detail="capability is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM integration_connections WHERE id=%s",(integration_id,))
+            integration=cur.fetchone()
+    if not integration: raise HTTPException(status_code=404,detail="Integration not found")
+    action_map={"health_check":"read","list_calendars":"read","read_availability":"read","list_contacts":"read",
+                "list_event_types":"read","booking_link":"draft","create_contact":"write_crm","create_deal":"write_crm",
+                "create_event":"create_event","send_message":"send_message","create_invoice":"charge_payment"}
+    action=action_map.get(capability,"write_crm")
+    principal=request.state.principal
+    import uuid
+    actor_id=principal.get("sub")
+    try: uuid.UUID(str(actor_id))
+    except Exception: actor_id=None
+    if principal.get("role") in {"owner","admin","operator"}:
+        allowed_scopes=["read","draft","write_crm","create_event","send_message","charge_payment","deploy"]
+    elif principal.get("role")=="client":
+        allowed_scopes=["read"]
+    else:
+        from agent_layer import agent_policy
+        try: allowed_scopes=agent_policy(payload.get("agent_name","research"))["agent"]["tools"]
+        except ValueError: allowed_scopes=["read"]
+    decision=evaluate_action(action,tools=allowed_scopes,
+                             approval_required=action in {"create_event","send_message","charge_payment","deploy"},
+                             approved=payload.get("approved") is True,
+                             estimated_cost=float(payload.get("estimated_cost") or 0),
+                             spent=float(payload.get("spent_usd") or 0),
+                             budget=float(payload.get("budget_usd") or 0))
+    if decision.decision!="allow": return {"executed":False,"decision":decision.__dict__}
+    try:
+        result=execute_integration(integration,capability,payload.get("input") or {})
+    except Exception as exc:
+        result={"status":"error","provider":integration["provider"],"error":type(exc).__name__}
+    result_status=result.status if hasattr(result,"status") else result.get("status","unknown")
+    if result_status=="error":
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE integration_connections SET status='error', metadata=metadata || %s::jsonb WHERE id=%s",
+                            (json.dumps({"last_provider_error":result.error if hasattr(result,"error") else result.get("error")}),integration_id))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            status=result.status if hasattr(result,"status") else result.get("status","unknown")
+            cur.execute("""INSERT INTO audit_log(actor_type,actor_id,action,entity_type,entity_id,metadata)
+                           VALUES (%s,%s,'provider_action','integration_connection',%s,%s::jsonb)""",
+                        (principal.get("role","agent"),actor_id,integration_id,
+                         json.dumps({"capability":capability,"status":status})))
+            cur.execute("SELECT receipt_hash FROM agent_action_receipts ORDER BY created_at DESC LIMIT 1")
+            previous=cur.fetchone()
+            receipt=make_receipt(action=action,decision=decision.decision,actor=principal.get("sub","unknown"),
+                                  entity_type="integration_connection",entity_id=integration_id,
+                                  previous_hash=previous["receipt_hash"] if previous else None,
+                                  metadata={"capability":capability,"status":status})
+            cur.execute("""INSERT INTO agent_action_receipts
+              (actor_type,actor_id,action,decision,risk,reason,previous_hash,receipt_hash,entity_type,entity_id,metadata)
+              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
+              (principal.get("role","agent"),actor_id,action,decision.decision,decision.risk,decision.reason,
+               receipt["previous_hash"],receipt["hash"],"integration_connection",integration_id,json.dumps(receipt["metadata"])))
+    return {"executed":True,"decision":decision.__dict__,"receipt_hash":receipt["hash"],
+            "result":result.__dict__ if hasattr(result,"__dict__") else result}
+
 @app.post("/integrations/{integration_id}/verify")
 def verify_integration(integration_id: str, payload: dict):
     if payload.get("approved") is not True:
         raise HTTPException(status_code=400, detail="Explicit approved=true is required")
     with get_conn() as conn:
         with conn.cursor() as cur:
+            cur.execute("SELECT * FROM integration_connections WHERE id=%s",(integration_id,))
+            row=cur.fetchone()
+            if not row: raise HTTPException(status_code=404,detail="Integration not found")
+    health=provider_status(row) if row.get("secret_ref") else {"status":"handoff_required","error":"No secret reference"}
+    if health["status"]!="ok" and not payload.get("allow_handoff"):
+        raise HTTPException(status_code=409,detail={"message":"Provider health check failed","health":health})
+    with get_conn() as conn:
+        with conn.cursor() as cur:
             cur.execute(
                 """UPDATE integration_connections
                    SET status='verified', connected_at=COALESCE(connected_at,now()),
-                       metadata=metadata || %s::jsonb
+                       last_health_check_at=now(), metadata=metadata || %s::jsonb
                    WHERE id=%s RETURNING *""",
-                (json.dumps({"verified_by": payload.get("verified_by", "human"), "verification_note": payload.get("note")}), integration_id),
+                (json.dumps({"verified_by": payload.get("verified_by", "human"), "verification_note": payload.get("note"),"health":health}), integration_id),
             )
             row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Integration not found")
+            if not row: raise HTTPException(status_code=404, detail="Integration not found")
             cur.execute(
                 """INSERT INTO audit_log (actor_type, action, entity_type, entity_id, metadata)
                    VALUES ('human','integration_verified','integration_connection',%s,%s::jsonb)""",
@@ -2648,10 +2838,26 @@ def oauth_callback(provider: str, code: str, state: str, request: Request):
     claims = verify_state(state)
     if not claims or claims.get("provider") != provider:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM oauth_state_nonces WHERE expires_at < now()")
+            try:
+                cur.execute("""INSERT INTO oauth_state_nonces(nonce,provider,project_id,expires_at)
+                               VALUES (%s,%s,%s,to_timestamp(%s))
+                               ON CONFLICT DO NOTHING RETURNING nonce""",
+                            (claims["nonce"],provider,claims["project_id"],claims["exp"]))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=400,detail="OAuth state has already been consumed")
+                cur.execute("UPDATE oauth_state_nonces SET consumed_at=now() WHERE nonce=%s",(claims["nonce"],))
+            except HTTPException:
+                raise
     redirect_uri = str(request.base_url).rstrip("/") + f"/integrations/oauth/{provider}/callback"
     try:
         tokens = token_request(provider, code, redirect_uri, claims.get("code_verifier"))
         secret_ref = f"oauth/{provider}/{claims['project_id']}"
+        if tokens.get("expires_in"):
+            from time import time
+            tokens["expires_at"]=time()+float(tokens["expires_in"])
         secret_backend().put(secret_ref, json.dumps(tokens))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"OAuth connection failed: {type(exc).__name__}")
@@ -2871,3 +3077,581 @@ def create_regional_playbook(payload: dict):
                 ),
             )
             return cur.fetchone()
+
+
+# --- Control & Intelligence Core ---
+
+@app.get("/governance/agents/{agent_name}")
+def governance_agent(agent_name: str):
+    from agent_layer import agent_definition
+    try:
+        definition=agent_definition(agent_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM agent_policies WHERE agent_name=%s",(agent_name,))
+            row=cur.fetchone()
+    return {"agent":normalize_policy(agent_name,row), "definition":definition}
+
+@app.post("/governance/evaluate")
+def governance_evaluate(payload: dict):
+    agent=payload.get("agent_name")
+    action=payload.get("action")
+    if not agent or not action:
+        raise HTTPException(status_code=400,detail="agent_name and action are required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM agent_policies WHERE agent_name=%s",(agent,))
+            row=cur.fetchone()
+            if row:
+                policy=normalize_policy(agent,row)
+            else:
+                from agent_layer import agent_policy
+                policy=agent_policy(agent)
+            cur.execute("SELECT COALESCE(SUM(amount),0) AS spent FROM agent_budget_ledger WHERE agent_name=%s AND occurred_at >= date_trunc('month',now())",(agent,))
+            spent=float(cur.fetchone()["spent"] or 0)
+    decision=evaluate_action(action,tools=policy["tools"],approval_required=policy["approval_required"],
+                             approved=bool(payload.get("approved")),spent=spent,budget=policy["budget_usd"],
+                             estimated_cost=float(payload.get("estimated_cost") or 0))
+    return {"decision":decision.__dict__,"policy":policy,"spent_usd":spent}
+
+@app.post("/governance/receipts")
+def governance_receipt(payload: dict):
+    receipt=make_receipt(action=payload.get("action","unknown"),decision=payload.get("decision","unknown"),
+                         actor=payload.get("actor","agent"),entity_type=payload.get("entity_type"),
+                         entity_id=payload.get("entity_id"),cost=payload.get("cost",0),
+                         previous_hash=payload.get("previous_hash"),metadata=payload.get("metadata"))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO agent_action_receipts
+              (agent_run_id,actor_type,action,decision,risk,reason,estimated_cost,previous_hash,receipt_hash,entity_type,entity_id,metadata)
+              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+              (payload.get("agent_run_id"),payload.get("actor_type","agent"),receipt["action"],receipt["decision"],
+               payload.get("risk","unknown"),payload.get("reason",""),receipt["cost"],receipt["previous_hash"],
+               receipt["hash"],receipt["entity_type"],receipt["entity_id"],json.dumps(receipt["metadata"])))
+            return cur.fetchone()
+
+@app.post("/evidence/claims")
+def create_evidence_claim(payload: dict):
+    claim=payload.get("claim")
+    evidence=payload.get("evidence") or []
+    if not claim or not evidence:
+        raise HTTPException(status_code=400,detail="claim and evidence are required")
+    built=build_claim(claim,evidence,alternatives=payload.get("alternatives"))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO evidence_claims
+              (business_id,research_report_id,opportunity_id,claim,evidence_strength,alternatives,verified_at)
+              VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING *""",
+              (payload.get("business_id"),payload.get("research_report_id"),payload.get("opportunity_id"),
+               claim,built["evidence_strength"],json.dumps(built["alternatives"]),built["verified_at"]))
+            row=cur.fetchone()
+            for item in evidence:
+                eid=item.get("id")
+                if eid:
+                    cur.execute("INSERT INTO claim_evidence(claim_id,evidence_id,relation) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING",
+                                (row["id"],eid,item.get("relation","supports")))
+            return {**row,"evidence_strength":built["evidence_strength"]}
+
+@app.get("/evidence/claims/{opportunity_id}")
+def list_evidence_claims(opportunity_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT c.*, COALESCE(jsonb_agg(jsonb_build_object(
+              'id',e.id,'observation',e.observation,'source_url',e.source_url,'confidence',e.confidence,'relation',ce.relation))
+              FILTER (WHERE e.id IS NOT NULL),'[]') AS evidence
+              FROM evidence_claims c LEFT JOIN claim_evidence ce ON ce.claim_id=c.id
+              LEFT JOIN evidence_items e ON e.id=ce.evidence_id
+              WHERE c.opportunity_id=%s GROUP BY c.id ORDER BY c.verified_at DESC""",(opportunity_id,))
+            return cur.fetchall()
+
+@app.get("/services/{service_name}/blueprint")
+def service_blueprint(service_name: str):
+    try: return blueprint(service_name)
+    except ValueError as exc: raise HTTPException(status_code=404,detail=str(exc))
+
+@app.post("/projects/{project_id}/blueprint")
+def project_blueprint(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            project,_=_delivery_project(cur,project_id)
+            service=project.get("service_name")
+            cur.execute("SELECT options FROM project_options WHERE project_id=%s",(project_id,))
+            row=cur.fetchone()
+            selected=row["options"] if row else {}
+            try:
+                return instantiate(service,selected,project.get("requirements") or {})
+            except ValueError as exc:
+                raise HTTPException(status_code=404,detail=str(exc))
+
+@app.post("/automation/runs/{run_id}/checkpoint")
+def save_workflow_checkpoint(run_id: str, payload: dict):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workflow_runs WHERE id=%s",(run_id,))
+            run=cur.fetchone()
+            if not run: raise HTTPException(status_code=404,detail="Workflow run not found")
+            state=checkpoint_state(run,step=payload.get("step"),state=payload.get("state"))
+            cur.execute("""INSERT INTO workflow_checkpoints(workflow_run_id,step,state)
+                           VALUES (%s,%s,%s::jsonb) RETURNING *""",
+                        (run_id,state["step"],json.dumps(state["state"])))
+            cur.execute("UPDATE workflow_runs SET checkpoint_version=checkpoint_version+1, output=%s::jsonb WHERE id=%s",
+                        (json.dumps(state["state"]),run_id))
+            return cur.fetchone()
+
+@app.get("/automation/runs/{run_id}/checkpoints")
+def list_workflow_checkpoints(run_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM workflow_checkpoints WHERE workflow_run_id=%s ORDER BY created_at DESC",(run_id,))
+            return cur.fetchall()
+
+@app.post("/analytics/blueprint-optimizations")
+def create_blueprint_optimization(payload: dict):
+    metric=payload.get("metric_name")
+    if not metric or payload.get("before_value") is None or payload.get("after_value") is None:
+        raise HTTPException(status_code=400,detail="metric_name, before_value and after_value are required")
+    recommendation=propose(metric,payload["before_value"],payload["after_value"],payload.get("target"),
+                            payload.get("service"),payload.get("blueprint_version",1))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            service_id=None
+            if payload.get("service"):
+                cur.execute("SELECT id FROM services WHERE name=%s",(payload["service"],))
+                row=cur.fetchone(); service_id=row["id"] if row else None
+            cur.execute("""INSERT INTO blueprint_optimization_proposals
+              (service_id,project_id,source_metric,before_value,after_value,delta,recommendation)
+              VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+              (service_id,payload.get("project_id"),metric,payload["before_value"],payload["after_value"],
+               recommendation["delta"],json.dumps(recommendation)))
+            return cur.fetchone()
+
+@app.post("/analytics/blueprint-optimizations/scan")
+def scan_blueprint_optimizations(payload: dict):
+    project_id=payload.get("project_id")
+    service=payload.get("service")
+    limit=max(1,min(int(payload.get("limit",100)),500))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            sql="""SELECT metric_name, MIN(value) AS before_value, MAX(value) AS after_value,
+                          MIN(source) AS source
+                   FROM client_metric_snapshots
+                   WHERE (%s IS NULL OR project_id=%s)
+                     AND captured_at >= now() - interval '90 days'
+                   GROUP BY metric_name
+                   HAVING COUNT(*) >= 2
+                   ORDER BY metric_name LIMIT %s"""
+            cur.execute(sql,(project_id,project_id,limit))
+            rows=cur.fetchall()
+            created=[]
+            for row in rows:
+                recommendation=propose(row["metric_name"],row["before_value"],row["after_value"],None,service,1)
+                cur.execute("""INSERT INTO blueprint_optimization_proposals
+                  (project_id,source_metric,before_value,after_value,delta,recommendation)
+                  VALUES (%s,%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+                  (project_id,row["metric_name"],row["before_value"],row["after_value"],
+                   recommendation["delta"],json.dumps(recommendation)))
+                created.append(cur.fetchone())
+            return {"created":created,"count":len(created),"automation":"proposal_only_until_approval"}
+
+@app.post("/analytics/blueprint-optimizations/{proposal_id}/approve")
+def approve_blueprint_optimization(proposal_id: str, payload: dict, request: Request):
+    if payload.get("approved") is not True:
+        raise HTTPException(status_code=400,detail="Explicit approved=true is required")
+    principal=request.state.principal
+    if principal.get("role") not in {"owner","admin","operator"}:
+        raise HTTPException(status_code=403,detail="Operator approval required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM blueprint_optimization_proposals WHERE id=%s",(proposal_id,))
+            proposal=cur.fetchone()
+            if not proposal: raise HTTPException(status_code=404,detail="Optimization proposal not found")
+            cur.execute("""UPDATE blueprint_optimization_proposals
+                           SET status='approved',approved_at=now(),approved_by=%s WHERE id=%s RETURNING *""",
+                        (principal.get("sub"),proposal_id))
+            return cur.fetchone()
+
+@app.post("/analytics/blueprint-optimizations/{proposal_id}/publish")
+def publish_blueprint_optimization(proposal_id: str, payload: dict, request: Request):
+    if payload.get("approved") is not True:
+        raise HTTPException(status_code=400,detail="Explicit approved=true is required")
+    principal=request.state.principal
+    if principal.get("role") not in {"owner","admin"}:
+        raise HTTPException(status_code=403,detail="Owner/admin approval required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT p.*,s.name AS service_name
+                          FROM blueprint_optimization_proposals p
+                          LEFT JOIN services s ON s.id=p.service_id WHERE p.id=%s""",(proposal_id,))
+            proposal=cur.fetchone()
+            if not proposal: raise HTTPException(status_code=404,detail="Optimization proposal not found")
+            if proposal["status"]!="approved": raise HTTPException(status_code=409,detail="Proposal must be approved before publish")
+            if not proposal["service_id"]: raise HTTPException(status_code=409,detail="Proposal has no service")
+            cur.execute("SELECT COALESCE(MAX(version),0)+1 AS next_version FROM service_blueprint_versions WHERE service_id=%s",(proposal["service_id"],))
+            version=cur.fetchone()["next_version"]
+            recommendation=proposal["recommendation"] or {}
+            cur.execute("UPDATE service_blueprint_versions SET active=false WHERE service_id=%s",(proposal["service_id"],))
+            cur.execute("""INSERT INTO service_blueprint_versions(service_id,version,blueprint,active)
+                           SELECT %s,%s,blueprint || %s::jsonb,true
+                           FROM service_blueprint_versions WHERE service_id=%s
+                           ORDER BY version DESC LIMIT 1 RETURNING *""",
+                        (proposal["service_id"],version,json.dumps({"optimization":recommendation}),proposal["service_id"]))
+            created=cur.fetchone()
+            cur.execute("UPDATE blueprint_optimization_proposals SET status='published' WHERE id=%s",(proposal_id,))
+            return {"proposal":proposal,"published_blueprint":created}
+
+@app.get("/analytics/blueprint-optimizations")
+def list_blueprint_optimizations(status: str|None=None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if status:
+                cur.execute("SELECT * FROM blueprint_optimization_proposals WHERE status=%s ORDER BY created_at DESC",(status,))
+            else:
+                cur.execute("SELECT * FROM blueprint_optimization_proposals ORDER BY created_at DESC LIMIT 200")
+            return cur.fetchall()
+
+@app.get("/analytics/unit-economics")
+def analytics_unit_economics(project_id: str|None=None):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if project_id:
+                cur.execute("SELECT COALESCE(SUM(amount),0) AS revenue FROM revenue_transactions WHERE project_id=%s AND status IN ('paid','completed')",(project_id,))
+                revenue=float(cur.fetchone()["revenue"] or 0)
+                cur.execute("SELECT COALESCE(SUM(amount),0) AS cost FROM cost_records WHERE project_id=%s",(project_id,))
+                cost=float(cur.fetchone()["cost"] or 0)
+            else:
+                cur.execute("SELECT COALESCE(SUM(amount),0) AS revenue FROM revenue_transactions WHERE status IN ('paid','completed')")
+                revenue=float(cur.fetchone()["revenue"] or 0)
+                cur.execute("SELECT COALESCE(SUM(amount),0) AS cost FROM cost_records")
+                cost=float(cur.fetchone()["cost"] or 0)
+            return unit_economics(revenue,cost)
+
+@app.post("/analytics/client-metrics")
+def record_client_metric(payload: dict):
+    if not payload.get("metric_name"): raise HTTPException(status_code=400,detail="metric_name is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO client_metric_snapshots
+              (client_id,project_id,metric_name,value,unit,source,client_confirmed)
+              VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
+              (payload.get("client_id"),payload.get("project_id"),payload["metric_name"],payload.get("value"),
+               payload.get("unit"),payload.get("source","operator"),bool(payload.get("client_confirmed"))))
+            return cur.fetchone()
+
+@app.get("/analytics/client-metrics/{project_id}")
+def list_client_metrics(project_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM client_metric_snapshots WHERE project_id=%s ORDER BY captured_at DESC",(project_id,))
+            return cur.fetchall()
+
+
+@app.get("/agent-gateway/tools")
+def agent_gateway_tools():
+    return {"tools":agent_tool_catalog(),"policy":"All writes and external actions must pass /governance/evaluate."}
+
+@app.post("/agent-gateway/authorize")
+def agent_gateway_authorize(payload: dict):
+    name=payload.get("tool")
+    if not name: raise HTTPException(status_code=400,detail="tool is required")
+    try: tool=resolve_agent_tool(name)
+    except KeyError: raise HTTPException(status_code=404,detail="Unknown agent tool")
+    allowed=payload.get("allowed_scopes")
+    if not allowed and payload.get("agent_name"):
+        from agent_layer import agent_policy
+        try: allowed=agent_policy(payload["agent_name"])["agent"]["tools"]
+        except ValueError: allowed=[]
+    allowed=allowed or []
+    decision=evaluate_action(tool["scope"],tools=allowed,
+                             approval_required=bool(payload.get("approval_required",True)),
+                             approved=bool(payload.get("approved")),
+                             spent=float(payload.get("spent_usd") or 0),
+                             budget=float(payload.get("budget_usd") or 0),
+                             estimated_cost=float(payload.get("estimated_cost") or 0))
+    return {"tool":name,"risk":tool["risk"],"decision":decision.__dict__}
+
+@app.post("/agent-evaluations/trajectory")
+def record_agent_trajectory(payload: dict):
+    if not payload.get("agent_run_id") or payload.get("sequence") is None or not payload.get("event_type"):
+        raise HTTPException(status_code=400,detail="agent_run_id, sequence and event_type are required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO agent_trajectory_events
+              (agent_run_id,sequence,event_type,action,input,output,decision,latency_ms,cost_usd)
+              VALUES (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s) RETURNING *""",
+              (payload["agent_run_id"],payload["sequence"],payload["event_type"],payload.get("action"),
+               json.dumps(payload.get("input") or {}),json.dumps(payload.get("output") or {}),
+               payload.get("decision"),payload.get("latency_ms"),payload.get("cost_usd",0)))
+            return cur.fetchone()
+
+@app.get("/agent-evaluations/trajectory/{agent_run_id}")
+def get_agent_trajectory(agent_run_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM agent_trajectory_events WHERE agent_run_id=%s ORDER BY sequence,created_at",(agent_run_id,))
+            return cur.fetchall()
+
+@app.post("/agent-governance/charge")
+def charge_agent_budget(payload: dict):
+    if not payload.get("agent_name") or payload.get("amount") is None:
+        raise HTTPException(status_code=400,detail="agent_name and amount are required")
+    amount=float(payload["amount"])
+    if amount < 0: raise HTTPException(status_code=400,detail="amount must be non-negative")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COALESCE(SUM(amount),0) AS spent FROM agent_budget_ledger WHERE agent_name=%s AND occurred_at >= date_trunc('month',now())",(payload["agent_name"],))
+            spent=float(cur.fetchone()["spent"] or 0)
+            cur.execute("SELECT * FROM agent_policies WHERE agent_name=%s",(payload["agent_name"],))
+            row=cur.fetchone()
+            if row:
+                budget=float(row["budget_usd"] or 0)
+            else:
+                from agent_layer import agent_policy
+                budget=float(agent_policy(payload["agent_name"])["budget_usd"])
+            if spent+amount>budget:
+                raise HTTPException(status_code=409,detail={"message":"Agent budget exceeded","spent_usd":spent,"budget_usd":budget})
+            cur.execute("""INSERT INTO agent_budget_ledger
+              (agent_name,project_id,workflow_run_id,agent_run_id,amount,category)
+              VALUES (%s,%s,%s,%s,%s,%s) RETURNING *""",
+              (payload["agent_name"],payload.get("project_id"),payload.get("workflow_run_id"),
+               payload.get("agent_run_id"),amount,payload.get("category","model")))
+            return {"charge":cur.fetchone(),"spent_usd":spent+amount,"budget_usd":budget}
+
+
+@app.websocket("/voice/stream")
+async def voice_stream(websocket: WebSocket):
+    signature=websocket.headers.get("X-Twilio-Signature")
+    if not validate_twilio_signature(str(websocket.url), {}, signature):
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    try:
+        await realtime_bridge(websocket, os.getenv("LUMA_VOICE_PUBLIC_URL"))
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
+
+
+@app.post("/voice/test-call")
+def voice_test_call(payload: dict, request: Request):
+    """Place a single operator-approved test call to any E.164 destination."""
+    principal=request.state.principal
+    if principal.get("role") not in {"owner","admin","operator"}:
+        raise HTTPException(status_code=403,detail="Operator approval required")
+    to=(payload.get("to") or "").strip()
+    if not to:
+        raise HTTPException(status_code=400,detail="to is required in E.164 format")
+    if payload.get("approved") is not True:
+        raise HTTPException(status_code=400,detail="Explicit approved=true is required")
+    decision=evaluate_action(
+        "place_call",
+        tools=["voice"],
+        approval_required=True,
+        approved=True,
+        spent=0,
+        budget=0,
+        estimated_cost=float(payload.get("estimated_cost") or 0),
+    )
+    if not decision.allowed:
+        raise HTTPException(status_code=403,detail=decision.reason)
+    try:
+        to=validate_destination(to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400,detail=str(exc))
+    integration={
+        "provider":"twilio",
+        "secret_ref":payload.get("secret_ref") or os.getenv("LUMA_TWILIO_SECRET_REF"),
+    }
+    try:
+        result=execute_integration(
+            integration,
+            "place_call",
+            {"to":to,"from":payload.get("from") or os.getenv("TWILIO_FROM_NUMBER"),
+             "url":payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/incoming"),
+             "status_callback":payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL") or (os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")+"/voice/twilio/status")
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502,detail=f"Voice provider error: {type(exc).__name__}")
+    provider_data=result.data if isinstance(result.data,dict) else {}
+    call_sid=provider_data.get("sid")
+    if result.status=="ok" and DATABASE_URL and call_sid:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO voice_sessions(caller,mode,status,disclosed,provider,provider_call_id,max_duration_seconds)
+                               VALUES (%s,'receptionist','active',false,'twilio',%s,%s)""",
+                            (to,call_sid,int(os.getenv("LUMA_VOICE_MAX_DURATION_SECONDS","1800"))))
+    return {"provider_result":result.__dict__,"governance":decision.__dict__}
+
+
+
+# --- Optional Voice ---
+
+@app.get("/voice/capabilities")
+def get_voice_capabilities():
+    return voice_capabilities()
+
+
+@app.post("/voice/sessions")
+def create_voice_session(payload: dict, request: Request):
+    mode=payload.get("mode","receptionist")
+    if mode not in VOICE_MODES:
+        raise HTTPException(status_code=400, detail="Unknown voice mode")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO voice_sessions
+                   (business_id,project_id,caller,mode,status,disclosed)
+                   VALUES (%s,%s,%s,%s,'active',false) RETURNING *""",
+                (payload.get("business_id"),payload.get("project_id"),payload.get("caller"),mode),
+            )
+            return cur.fetchone()
+
+
+@app.get("/voice/sessions/{session_id}")
+def get_voice_session(session_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM voice_sessions WHERE id=%s",(session_id,))
+            session=cur.fetchone()
+            if not session: raise HTTPException(status_code=404,detail="Voice session not found")
+            cur.execute("SELECT * FROM voice_turns WHERE session_id=%s ORDER BY sequence",(session_id,))
+            return {**session,"turns":cur.fetchall()}
+
+
+@app.post("/voice/sessions/{session_id}/turn")
+def record_voice_turn(session_id: str, payload: dict):
+    transcript=(payload.get("transcript") or "").strip()
+    speaker=payload.get("speaker","caller")
+    if not transcript: raise HTTPException(status_code=400,detail="transcript is required")
+    if speaker not in {"caller","assistant","system"}:
+        raise HTTPException(status_code=400,detail="invalid speaker")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id,status FROM voice_sessions WHERE id=%s",(session_id,))
+            session=cur.fetchone()
+            if not session: raise HTTPException(status_code=404,detail="Voice session not found")
+            if session["status"]!="active": raise HTTPException(status_code=409,detail="Voice session is not active")
+            cur.execute("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM voice_turns WHERE session_id=%s",(session_id,))
+            sequence=cur.fetchone()["sequence"]
+            cur.execute(
+                """INSERT INTO voice_turns(session_id,speaker,transcript,sequence,metadata)
+                   VALUES (%s,%s,%s,%s,%s::jsonb) RETURNING *""",
+                (session_id,speaker,transcript,sequence,json.dumps(payload.get("metadata") or {})),
+            )
+            return cur.fetchone()
+
+
+@app.post("/voice/sessions/{session_id}/disclose")
+def disclose_voice_session(session_id: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE voice_sessions SET disclosed=true WHERE id=%s RETURNING id,disclosed",
+                (session_id,),
+            )
+            row=cur.fetchone()
+            if not row: raise HTTPException(status_code=404,detail="Voice session not found")
+            return {"session_id":row["id"],"disclosed":row["disclosed"],"text":disclosure_text()}
+
+
+@app.post("/voice/sessions/{session_id}/end")
+def end_voice_session(session_id: str, payload: dict):
+    reason=payload.get("reason","completed")
+    allowed={"user_requested","escalated","completed","provider_error","policy_blocked"}
+    if reason not in allowed: raise HTTPException(status_code=400,detail="invalid end reason")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """UPDATE voice_sessions SET status=%s, escalation_reason=%s,
+                          ended_at=now() WHERE id=%s RETURNING *""",
+                (reason, payload.get("escalation_reason"), session_id),
+            )
+            row=cur.fetchone()
+            if not row: raise HTTPException(status_code=404,detail="Voice session not found")
+            return row
+
+
+@app.post("/voice/twilio/incoming")
+async def twilio_incoming(request: Request):
+    from urllib.parse import parse_qs
+    body=(await request.body()).decode("utf-8","replace")
+    form={k:v[-1] for k,v in parse_qs(body).items()}
+    call_sid=form.get("CallSid") or request.query_params.get("CallSid") or request.headers.get("X-Twilio-CallSid")
+    if not validate_twilio_signature(str(request.url), form, request.headers.get("X-Twilio-Signature")):
+        raise HTTPException(status_code=403, detail="Invalid Twilio webhook signature")
+    if DATABASE_URL and call_sid:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO voice_sessions(caller,provider,provider_call_id,mode,status,disclosed,max_duration_seconds)
+                       VALUES (%s,'twilio',%s,'receptionist','active',false,%s)""",
+                    (form.get("From") or call_sid,call_sid,int(os.getenv("LUMA_VOICE_MAX_DURATION_SECONDS","1800"))),
+                )
+    stream_url=os.getenv("LUMA_VOICE_STREAM_URL")
+    if not stream_url:
+        public_url=os.getenv("LUMA_VOICE_PUBLIC_URL","").rstrip("/")
+        if public_url:
+            stream_url=public_url.replace("https://","wss://").replace("http://","ws://")+"/voice/stream"
+    if stream_url:
+        xml=twilio_stream_twiml(stream_url)
+    else:
+        action_url=str(request.base_url).rstrip("/")+"/voice/twilio/gather"
+        xml=twilio_gather_twiml(action_url, disclosure_text())
+    return Response(content=xml, media_type="application/xml")
+
+
+@app.post("/voice/twilio/status")
+async def twilio_status(request: Request):
+    from urllib.parse import parse_qs
+    body=(await request.body()).decode("utf-8","replace")
+    form={k:v[-1] for k,v in parse_qs(body).items()}
+    if not validate_twilio_signature(str(request.url), form, request.headers.get("X-Twilio-Signature")):
+        raise HTTPException(status_code=403, detail="Invalid Twilio webhook signature")
+    call_sid=form.get("CallSid")
+    status=form.get("CallStatus")
+    if DATABASE_URL and call_sid:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""UPDATE voice_sessions
+                               SET last_provider_status=%s,
+                                   status=CASE WHEN %s IN ('completed','canceled','failed','busy','no-answer') THEN 'completed' ELSE status END,
+                                   ended_at=CASE WHEN %s IN ('completed','canceled','failed','busy','no-answer') THEN COALESCE(ended_at,now()) ELSE ended_at END
+                               WHERE provider_call_id=%s OR caller=%s""",
+                            (status,status,status,call_sid,call_sid))
+    return {"ok":True,"call_sid":call_sid,"status":status}
+
+@app.post("/voice/twilio/gather")
+async def twilio_gather(request: Request):
+    from urllib.parse import parse_qs
+    body=(await request.body()).decode("utf-8","replace")
+    form={k:v[-1] for k,v in parse_qs(body).items()}
+    transcript=(form.get("SpeechResult") or "").strip()
+    call_sid=form.get("CallSid")
+    if not validate_twilio_signature(str(request.url), form, request.headers.get("X-Twilio-Signature")):
+        raise HTTPException(status_code=403, detail="Invalid Twilio webhook signature")
+    if transcript and DATABASE_URL:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM voice_sessions WHERE caller=%s AND status='active' ORDER BY started_at DESC LIMIT 1",
+                    (call_sid,),
+                )
+                session=cur.fetchone()
+                if session:
+                    cur.execute("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM voice_turns WHERE session_id=%s",(session["id"],))
+                    seq=cur.fetchone()["sequence"]
+                    cur.execute(
+                        """INSERT INTO voice_turns(session_id,speaker,transcript,sequence,metadata)
+                           VALUES (%s,'caller',%s,%s,%s::jsonb)""",
+                        (session["id"],transcript,seq,json.dumps({"call_sid":call_sid})),
+                    )
+    action_url=str(request.base_url).rstrip("/")+"/voice/twilio/gather"
+    return Response(content=twilio_gather_twiml(action_url,"Thanks. I heard you. I can continue by email, or the voice system can continue this conversation."),media_type="application/xml")
+
+
+

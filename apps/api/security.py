@@ -7,7 +7,7 @@ import os, secrets
 from auth import verify_token
 
 API_KEY=os.getenv("LUMA_API_KEY")
-PUBLIC_PATHS={"/","/health","/auth/login","/docs","/openapi.json","/redoc"}
+PUBLIC_PATHS={"/","/health","/auth/login","/docs","/openapi.json","/redoc","/voice/twilio/incoming","/voice/twilio/gather","/voice/stream"}
 
 def authorized(provided):
     if not API_KEY:

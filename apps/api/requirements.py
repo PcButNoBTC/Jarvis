@@ -24,6 +24,7 @@ def compile_requirements(service: str | None, selected: dict[str, Any] | None,
     requirements["service"] = service
     requirements["configuration"] = dict(selected)
     requirements["configuration_complete"] = True
+    requirements.setdefault("approved", False)
 
     if service == "AI Website":
         requirements.update({

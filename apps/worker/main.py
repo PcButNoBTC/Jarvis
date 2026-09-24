@@ -35,3 +35,5 @@ def run_cycle():
                 })
                 if run.status_code >= 400:
                     print(f"[luma-worker] schedule {schedule['id']}: {run.text}", flush=True)
+    except Exception as exc:
+        print(f"[luma-worker] cycle failed: {type(exc).__name__}: {exc}", flush=True)

@@ -42,6 +42,38 @@ class TokenAdapter(ProviderAdapter):
         except Exception as exc:
             return None, str(exc)
 
+class SMTPAdapter(ProviderAdapter):
+    provider = "smtp"
+    capabilities = {"health_check", "send_email"}
+    def health_check(self):
+        host=self.credentials.get("host") or os.getenv("SMTP_HOST")
+        port=int(self.credentials.get("port") or os.getenv("SMTP_PORT","587"))
+        return ProviderResponse("ok" if host and port else "error",self.provider,"health_check",{"host_configured":bool(host),"port":port},
+                                None if host else "Missing SMTP host")
+    def execute(self, capability, payload=None):
+        if capability!="send_email": return super().execute(capability,payload)
+        import smtplib
+        from email.message import EmailMessage
+        payload=payload or {}
+        host=self.credentials.get("host") or os.getenv("SMTP_HOST")
+        port=int(self.credentials.get("port") or os.getenv("SMTP_PORT","587"))
+        username=self.credentials.get("username") or os.getenv("SMTP_USERNAME")
+        password=self.credentials.get("password") or os.getenv("SMTP_PASSWORD")
+        sender=payload.get("from") or self.credentials.get("from") or username
+        if not host or not sender or not payload.get("to"):
+            return ProviderResponse("error",self.provider,capability,{},"Missing SMTP host/sender/recipient")
+        message=EmailMessage()
+        message["From"]=sender; message["To"]=payload["to"]; message["Subject"]=payload.get("subject","")
+        message.set_content(payload.get("body",""))
+        try:
+            with smtplib.SMTP(host,port,timeout=20) as smtp:
+                smtp.starttls()
+                if username and password: smtp.login(username,password)
+                smtp.send_message(message)
+            return ProviderResponse("ok",self.provider,capability,{"sent":True,"to":payload["to"]})
+        except Exception as exc:
+            return ProviderResponse("error",self.provider,capability,{},type(exc).__name__)
+
 class GoogleCalendarAdapter(TokenAdapter):
     provider = "google_calendar"
     capabilities = {"health_check", "list_calendars", "read_availability", "create_event"}
@@ -126,14 +158,45 @@ class CalendlyAdapter(TokenAdapter):
         return super().execute(capability, payload)
 
 class TwilioAdapter(ProviderAdapter):
-    provider = "twilio"; capabilities = {"health_check", "call_forwarding", "voice", "sms"}
+    provider = "twilio"; capabilities = {"health_check", "call_forwarding", "voice", "sms", "place_call"}
     def health_check(self):
-        sid = os.getenv("TWILIO_ACCOUNT_SID"); token = os.getenv("TWILIO_AUTH_TOKEN")
-        if not sid or not token: return ProviderResponse("error", self.provider, "health_check", {}, "Missing Twilio credentials")
+        sid=self.credentials.get("account_sid") or os.getenv("TWILIO_ACCOUNT_SID")
+        token=self.credentials.get("auth_token") or os.getenv("TWILIO_AUTH_TOKEN")
+        if not sid or not token: return ProviderResponse("error",self.provider,"health_check",{},"Missing Twilio credentials")
         try:
-            r = httpx.get(f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json", auth=(sid, token), timeout=20)
-            return ProviderResponse("ok" if r.is_success else "error", self.provider, "health_check", r.json() if r.content else {}, None if r.is_success else r.text)
-        except Exception as exc: return ProviderResponse("error", self.provider, "health_check", {}, str(exc))
+            r=httpx.get(f"https://api.twilio.com/2010-04-01/Accounts/{sid}.json",auth=(sid,token),timeout=20)
+            return ProviderResponse("ok" if r.is_success else "error",self.provider,"health_check",r.json() if r.content else {},None if r.is_success else r.text)
+        except Exception as exc: return ProviderResponse("error",self.provider,"health_check",{},type(exc).__name__)
+    def execute(self, capability, payload=None):
+        payload=payload or {}
+        sid=self.credentials.get("account_sid") or os.getenv("TWILIO_ACCOUNT_SID")
+        token=self.credentials.get("auth_token") or os.getenv("TWILIO_AUTH_TOKEN")
+        if capability=="place_call":
+            import re
+            to=payload.get("to")
+            sender=payload.get("from") or self.credentials.get("from") or os.getenv("TWILIO_FROM_NUMBER")
+            twiml_url=payload.get("url") or os.getenv("LUMA_VOICE_TWIML_URL")
+            if not sid or not token or not sender or not to or not twiml_url:
+                return ProviderResponse("error",self.provider,capability,{},"Missing Twilio SID/token/from/url")
+            if not re.fullmatch(r"\+[1-9]\d{7,14}",to) or not re.fullmatch(r"\+[1-9]\d{7,14}",sender):
+                return ProviderResponse("error",self.provider,capability,{},"Phone numbers must use E.164 format")
+            try:
+                r=httpx.post(f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Calls.json",
+                             auth=(sid,token),data={"From":sender,"To":to,"Url":twiml_url,**({"StatusCallback":payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL"),"StatusCallbackEvent":["initiated","ringing","answered","completed"]} if (payload.get("status_callback") or os.getenv("LUMA_VOICE_STATUS_CALLBACK_URL")) else {})},timeout=20)
+                data=r.json() if r.content else {}
+                return ProviderResponse("ok" if r.is_success else "error",self.provider,capability,data,None if r.is_success else r.text)
+            except Exception as exc:
+                return ProviderResponse("error",self.provider,capability,{},type(exc).__name__)
+        if capability!="sms": return super().execute(capability,payload)
+        sender=payload.get("from") or self.credentials.get("from") or os.getenv("TWILIO_FROM_NUMBER")
+        if not sid or not token or not sender or not payload.get("to") or not payload.get("body"):
+            return ProviderResponse("error",self.provider,capability,{},"Missing Twilio SMS fields")
+        try:
+            r=httpx.post(f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+                         auth=(sid,token),data={"From":sender,"To":payload["to"],"Body":payload["body"]},timeout=20)
+            data=r.json() if r.content else {}
+            return ProviderResponse("ok" if r.is_success else "error",self.provider,capability,data,None if r.is_success else r.text)
+        except Exception as exc: return ProviderResponse("error",self.provider,capability,{},type(exc).__name__)
 
 class StripeAdapter(TokenAdapter):
     provider = "stripe"; capabilities = {"health_check", "create_invoice"}; base_url = "https://api.stripe.com/v1"; token_env = "STRIPE_SECRET_KEY"
@@ -146,6 +209,7 @@ class ClientManagedAdapter(ProviderAdapter):
     def execute(self, capability, payload=None): return ProviderResponse("handoff_required", self.provider, capability, payload or {}, "Client must complete this provider action")
 
 ADAPTERS = {
+    "smtp": SMTPAdapter,
     "google_calendar": GoogleCalendarAdapter,
     "microsoft_outlook": MicrosoftOutlookAdapter,
     "hubspot": HubSpotAdapter,

@@ -158,3 +158,9 @@ def option_summary(service_name, selected):
         }
         for item in definitions
     ]
+
+
+# Backward-compatible lazy wrapper avoids an import cycle with requirements.py.
+def compile_requirements(*args, **kwargs):
+    from requirements import compile_requirements as compiler
+    return compiler(*args, **kwargs)

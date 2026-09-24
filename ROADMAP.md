@@ -67,11 +67,11 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 ## Phase 7 — Integrations
 - [x] Provider registry
 - [x] Connection records
-- [ ] Email adapter
-- [~] Calendar adapters (Google, Outlook, Calendly OAuth/connect foundation + runtime adapters)
-- [~] CRM adapter (HubSpot OAuth/connect foundation + runtime adapter)
+- [x] Email adapter (SMTP runtime)
+- [x] Calendar adapters (Google, Outlook, Calendly runtime/connect foundation)
+- [x] CRM adapter (HubSpot OAuth/connect foundation + runtime adapter)
 - [ ] Forms adapter
-- [ ] Phone/voice adapter
+- [x] Phone/voice adapter (Twilio runtime + realtime bridge foundation)
 - [ ] Analytics adapter
 - [ ] Payment provider adapter
 - [ ] Hosting adapters
@@ -84,8 +84,8 @@ The Strong MVP is complete only when the operating loop is connected end-to-end.
 - [x] Roles/permissions
 - [x] Secret-reference abstraction
 - [~] Infisical secret backend (runtime integration implemented; deployment bootstrap still required)
-- [ ] Security event logging
-- [ ] Rate limiting
+- [x] Security event logging
+- [x] PostgreSQL-backed distributed application rate limiting
 
 ## Phase 9 — Client portal
 - [x] Client AI-disclosure and communication preferences
@@ -134,4 +134,75 @@ Every module must have:
 
 ## Remaining production dependencies
 
-The control plane now includes a client-trust layer: evidence-based fit review, outreach suppression, client preferences, outcome tracking, and regional playbooks. Live third-party execution is intentionally separate. The remaining work is provider adapter implementation and credential infrastructure: OAuth/API-key exchange for selected calendar/CRM providers, Infisical-backed secret storage, real calendar/CRM calls, and remaining email/phone/forms/payment/hosting calls, cron parsing/event delivery, and production authentication/RBAC. The registry, project configuration, approval history, secret references, and human gates are already in place so those adapters can be added without changing the project model.
+Core control-plane and selected live provider runtime paths are implemented. Remaining production work is deliberately bounded: provider-specific deployment/hosting, forms, analytics, broader payment execution, event-driven orchestration, enterprise authentication hardening, edge rate limiting, client messaging, and broader provider provisioning. Live credentials and provider-account testing remain required before declaring an integration production-ready.
+
+
+## Phase 12 — Control & Intelligence Core (revamp)
+- [x] Evidence/claim provenance model
+- [x] Evidence-strength separate from model confidence
+- [x] Reusable service blueprints
+- [x] Runtime action policy decisions
+- [x] Agent budget ledger and hard charge enforcement
+- [x] Scoped agent tool gateway
+- [x] Tamper-evident action receipts
+- [x] Durable workflow checkpoints
+- [x] Retry/backoff primitives
+- [x] Client metric snapshots
+- [x] Agent trajectory events
+- [x] Unit economics endpoint
+- [x] Security event schema
+- [x] DB-backed distributed rate limiting
+- [x] Provider actions wrapped by gateway/policy middleware
+- [x] Automated outcome-to-blueprint optimization with human publication gate
+
+- [x] Governed provider execution gateway
+- [x] OAuth access-token expiry persistence
+- [x] OAuth refresh and refresh-token rotation persistence
+- [x] Provider health lifecycle
+- [x] Outcome-driven optimization proposal generation
+- [x] Human-gated blueprint approval/publishing
+- [x] Automated metric scanning for optimization candidates
+- [x] Distributed PostgreSQL-backed rate limiting for API/auth/OAuth
+- [x] Self-hosted Infisical deployment bundle
+
+
+## Capability status language
+
+- **Ready:** implemented control-plane capability.
+- **Runtime adapter:** provider action code exists and is reachable through governed execution.
+- **Foundation:** contracts/data model exist but production execution is incomplete.
+- **Supported:** bounded execution exists with explicit configuration requirements.
+- **Production-ready:** reserved for paths that have been exercised against real provider accounts and deployment infrastructure.
+
+Do not equate a checked item with universal third-party provisioning.
+
+## Production release gate
+
+- [x] Production readiness runbook and explicit release verification gate
+- [x] Liveness/readiness separation and baseline security response headers
+
+## Phase 13 — Optional Voice
+
+The client must never need to join a call. Email and the client portal remain the default communication path; voice is an optional interface into the same client/project context.
+
+- [x] Voice session control-plane model
+- [x] Conversation turn persistence
+- [x] AI disclosure requirement
+- [x] Voice modes and escalation states
+- [x] Twilio inbound webhook/TwiML compatibility path
+- [x] Real-time media-stream contract
+- [x] Realtime speech/model bridge foundation with interruption handling
+- [x] Realtime GA WebSocket session/audio event contract aligned
+- [x] Production webhook signature validation
+- [x] Operator-approved custom-number test-call endpoint
+- [x] E.164 destination validation and call lifecycle persistence
+- [x] Do-not-call / preferred-channel policy primitives
+- [ ] Real provider-account test and realtime contract validation
+- [ ] Natural-voice quality evaluation against target latency/turn-taking
+- [ ] Conversation intelligence connected to governed tools
+- [ ] Automatic post-call email summary
+- [ ] Human escalation/transfer
+
+### Voice quality bar
+
+Luma Voice is not considered production-ready merely because speech-to-text and text-to-speech work. The production bar is natural turn-taking, interruption handling, low latency, context-aware answers, explicit AI disclosure, no fabricated commitments, governed actions, reliable escalation, and an email follow-up path.
